@@ -379,6 +379,11 @@ describe('studio snapshot helpers', () => {
     )
   })
 
+  it('skips scripts that never held the document-agent surface', () => {
+    const theme = '// 다크테마 FOUC 방지\nconst mode = "dark"'
+    expect(exposePrepareTextCommand(theme)).toBe(theme)
+  })
+
   it('removes abandoned page-turn patches from a local snapshot', () => {
     const patched = [
       '/*genoffice-eager-prefetch*/n()',

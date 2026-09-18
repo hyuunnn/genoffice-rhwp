@@ -492,7 +492,15 @@ function attachTableEditSurface(js) {
   return next
 }
 
+/**
+ * Every downloaded .js is patched, but only the bundle holding the document
+ * agent has the surface. theme-init.js and friends never needed the patch —
+ * skip them quietly so the drift alarm only fires on the real bundle.
+ */
+const AGENT_SURFACE_RE = /getSelectionContext|applyTextCommand|genoffice-prepare-text/
+
 export function exposePrepareTextCommand(js) {
+  if (!AGENT_SURFACE_RE.test(js)) return js
   const closed = repairSwallowedCellLength(
     repairTableInsertOffset(
       repairDeferredCellWrite(
