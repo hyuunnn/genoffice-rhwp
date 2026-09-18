@@ -24,11 +24,7 @@ import {
   htmlIsDirty,
   requestHtmlClose,
 } from '../../../html/src/main/html-main'
-import {
-  createHwpView,
-  hwpIsDirty,
-  requestHwpClose,
-} from '../../../hwp/src/main/hwp-main'
+import { createHwpView, hwpIsDirty, requestHwpClose } from '../../../hwp/src/main/hwp-main'
 import {
   createPdfView,
   clearPdfDirty,
