@@ -127,7 +127,6 @@ export const en = {
   appMoreItems: '+{count} more…',
   appTruncationNote: 'First {shown} of {total}',
   appGoToButtonTitle: 'Go To (⌘G)',
-  appNameBoxTitle: 'Name Box — type an address or name, then press Enter',
   appPivotChartHintIn: 'Create a PivotChart from the current PivotTable',
   appPivotChartHintOut: 'Select a cell inside the PivotTable output first, then pick a chart type',
   appChartColumn: 'Column',
@@ -304,13 +303,13 @@ export const en = {
     'This workbook is too large to load fully into memory; filtering is unavailable for this file.',
   appDialogCancel: 'Cancel',
   appPivotSheetNoMove: 'This sheet contains a PivotTable — moving ranges is not supported yet.',
+  appMergeOverTable:
+    'The selection overlaps an Excel table — merging cells inside a table is not supported yet.',
   appTableFilterNoEdit:
     "This sheet's filter belongs to an Excel table — editing it cannot be saved yet.",
   appAutofillStreaming: 'Autofill into an area that is still streaming in is not allowed yet.',
   appDvNeedsIndexed:
     'Editing data validation needs this sheet fully indexed first — try again in a moment.',
-  appDuplicateNeedsFullLoad:
-    'Duplicating a sheet needs the fully-loaded mode — this workbook is too large and streams partially.',
   appPivotSheetNoDuplicate:
     'This sheet contains a PivotTable — duplicating it is not supported yet.',
   appDuplicateScopedNames:
@@ -508,6 +507,12 @@ export const en = {
   appPdfCanceled: 'PDF export canceled.',
   appPdfExported: 'Exported {path}.',
   appPdfExportFailed: 'Unable to export the PDF.',
+  appPrintPreparing: 'Preparing to print…',
+  appPrintSent: 'Sent to the printer.',
+  appPrintCanceled: 'Printing canceled.',
+  appPrintFailed: 'Unable to print.',
+  appPrintNeedsFullLoad:
+    'Printing needs the whole workbook loaded — please wait for loading to finish.',
   appCsvExportNeedsFullLoad:
     'CSV export needs the fully loaded workbook — wait for loading to finish.',
   appCsvExportTooLarge: 'The sheet is too large to export as CSV.',
@@ -544,6 +549,8 @@ export const en = {
     'Defined-name changes cannot be saved together with row/column or sheet-structure changes — save them separately.',
   appSaveErrChangedOnDisk:
     'The file was changed on disk by another program — save aborted; reopen the file and try again.',
+  appSaveErrTargetLocked:
+    'The file could not be replaced — it looks locked by another program (open in Excel, or being scanned/synced). Close it there and save again.',
   appSaveErrStylesheetLimited:
     "This workbook's stylesheet is missing basic structure, so style changes cannot be saved.",
   appSaveErrPackageGuard:
@@ -597,6 +604,9 @@ export const en = {
   appFullyLoaded: 'Workbook fully loaded — formulas recalculate live, rows/columns editable.',
   appRangeMustBeVector: '{range} must be a single row or a single column of cells.',
   appRangeTooManyCells: '{range} covers more than {max} cells.',
+  appCopyLoadingRange: 'Loading {range} for copy…',
+  appCopyValuesOnly:
+    '{range} copied as values only ({cells} cells): styles are kept only up to {max} cells.',
   appSheetStillIndexing: 'The sheet is still indexing — try again in a moment.',
   appPrintNothing: 'The sheet has nothing to print.',
   appPrintTooLarge:
@@ -1288,6 +1298,8 @@ export const en = {
   appFormatMenu: 'Format',
   appRowHeight: 'Row Height',
   appColWidth: 'Column Width',
+  appAutoFitRowHeight: 'AutoFit Row Height',
+  appAutoFitColWidth: 'AutoFit Column Width',
   appRowHeightLabel: 'Row height (points)',
   appColWidthLabel: 'Column width (characters)',
   appDeleteRow: 'Delete row',

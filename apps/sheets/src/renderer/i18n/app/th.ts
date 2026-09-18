@@ -126,7 +126,6 @@ export const th = {
   appMoreItems: '+{count} รายการ…',
   appTruncationNote: '{shown} รายการแรกจาก {total}',
   appGoToButtonTitle: 'ไปที่ (⌘G)',
-  appNameBoxTitle: 'กล่องชื่อ — พิมพ์ที่อยู่หรือชื่อ แล้วกด Enter',
   appPivotChartHintIn: 'สร้าง PivotChart จาก PivotTable ปัจจุบัน',
   appPivotChartHintOut: 'เลือกเซลล์ภายในพื้นที่แสดงผลของ PivotTable ก่อน แล้วจึงเลือกชนิดแผนภูมิ',
   appChartColumn: 'คอลัมน์',
@@ -299,12 +298,11 @@ export const th = {
     'เวิร์กบุ๊กนี้ใหญ่เกินกว่าจะโหลดทั้งหมดลงหน่วยความจำ ไม่สามารถใช้ตัวกรองกับไฟล์นี้ได้',
   appDialogCancel: 'ยกเลิก',
   appPivotSheetNoMove: 'แผ่นงานนี้มี PivotTable — ยังไม่รองรับการย้ายช่วง',
+  appMergeOverTable: 'ส่วนที่เลือกซ้อนทับตาราง Excel — ยังไม่รองรับการผสานเซลล์ภายในตาราง',
   appTableFilterNoEdit: 'ตัวกรองของแผ่นงานนี้เป็นของตาราง Excel — การแก้ไขยังบันทึกไม่ได้',
   appAutofillStreaming: 'ยังไม่อนุญาตให้เติมอัตโนมัติลงในพื้นที่ที่กำลังโหลดแบบสตรีม',
   appDvNeedsIndexed:
     'การแก้ไขการตรวจสอบความถูกต้องของข้อมูลต้องรอให้แผ่นงานนี้ทำดัชนีเสร็จก่อน — ลองใหม่อีกสักครู่',
-  appDuplicateNeedsFullLoad:
-    'การทำสำเนาแผ่นงานต้องใช้โหมดโหลดเต็ม — เวิร์กบุ๊กนี้ใหญ่เกินไปจึงโหลดแบบสตรีมบางส่วน',
   appPivotSheetNoDuplicate: 'แผ่นงานนี้มี PivotTable — ยังไม่รองรับการทำสำเนาแผ่นงานนี้',
   appDuplicateScopedNames:
     'แผ่นงานนี้มีชื่อที่กำหนดระดับแผ่นงาน — ยังไม่รองรับการทำสำเนาแผ่นงานนี้',
@@ -502,6 +500,11 @@ export const th = {
   appPdfCanceled: 'ยกเลิกการส่งออก PDF แล้ว',
   appPdfExported: 'ส่งออก {path} แล้ว',
   appPdfExportFailed: 'ส่งออก PDF ไม่ได้',
+  appPrintPreparing: 'กำลังเตรียมพิมพ์…',
+  appPrintSent: 'ส่งไปยังเครื่องพิมพ์แล้ว',
+  appPrintCanceled: 'ยกเลิกการพิมพ์แล้ว',
+  appPrintFailed: 'ไม่สามารถพิมพ์ได้',
+  appPrintNeedsFullLoad: 'การพิมพ์ต้องโหลดสมุดงานให้เสร็จก่อน โปรดรอให้การโหลดเสร็จสิ้น',
   appCsvExportNeedsFullLoad: 'การส่งออก CSV ต้องรอให้เวิร์กบุ๊กโหลดเต็มก่อน — รอให้โหลดเสร็จ',
   appCsvExportTooLarge: 'ชีตใหญ่เกินไป ส่งออกเป็น CSV ไม่ได้',
   appCsvExportCanceled: 'ยกเลิกการส่งออก CSV แล้ว',
@@ -535,6 +538,8 @@ export const th = {
     'การเปลี่ยนแปลงชื่อที่กำหนดไม่สามารถบันทึกพร้อมการเปลี่ยนแปลงแถว/คอลัมน์หรือโครงสร้างชีตได้ — โปรดแยกบันทึกเป็นสองครั้ง',
   appSaveErrChangedOnDisk:
     'ไฟล์ถูกโปรแกรมอื่นแก้ไขบนดิสก์ — ยกเลิกการบันทึกแล้ว โปรดเปิดไฟล์ใหม่แล้วลองอีกครั้ง',
+  appSaveErrTargetLocked:
+    'ไม่สามารถแทนที่ไฟล์ได้ — ดูเหมือนถูกล็อกโดยโปรแกรมอื่น (เปิดใน Excel หรือกำลังสแกน/ซิงก์) ปิดไฟล์นั้นแล้วบันทึกอีกครั้ง',
   appSaveErrStylesheetLimited:
     'สไตล์ชีตของเวิร์กบุ๊กนี้ขาดโครงสร้างพื้นฐาน จึงบันทึกการเปลี่ยนแปลงสไตล์ไม่ได้',
   appSaveErrPackageGuard:
@@ -587,6 +592,9 @@ export const th = {
   appFullyLoaded: 'เวิร์กบุ๊กโหลดเต็มแล้ว — สูตรคำนวณใหม่แบบสด แก้ไขแถว/คอลัมน์ได้',
   appRangeMustBeVector: '{range} ต้องเป็นเซลล์แถวเดียวหรือคอลัมน์เดียว',
   appRangeTooManyCells: '{range} ครอบคลุมเกิน {max} เซลล์',
+  appCopyLoadingRange: 'กำลังโหลด {range} เพื่อคัดลอก…',
+  appCopyValuesOnly:
+    'คัดลอก {range} เป็นค่าเท่านั้น ({cells} เซลล์): จะเก็บสไตล์ไว้เฉพาะไม่เกิน {max} เซลล์',
   appSheetStillIndexing: 'แผ่นงานยังทำดัชนีอยู่ — ลองใหม่อีกสักครู่',
   appPrintNothing: 'แผ่นงานนี้ไม่มีอะไรให้พิมพ์',
   appPrintTooLarge: 'ช่วงการพิมพ์ใหญ่เกินไป — กำหนดพื้นที่พิมพ์ให้เล็กลงในแท็บเค้าโครงหน้ากระดาษ',
@@ -1275,6 +1283,8 @@ export const th = {
   appFormatMenu: 'รูปแบบ',
   appRowHeight: 'ความสูงของแถว',
   appColWidth: 'ความกว้างของคอลัมน์',
+  appAutoFitRowHeight: 'ปรับความสูงแถวอัตโนมัติ',
+  appAutoFitColWidth: 'ปรับความกว้างคอลัมน์อัตโนมัติ',
   appRowHeightLabel: 'ความสูงของแถว (พอยต์)',
   appColWidthLabel: 'ความกว้างของคอลัมน์ (อักขระ)',
   appDeleteRow: 'ลบแถว',

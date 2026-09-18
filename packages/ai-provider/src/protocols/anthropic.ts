@@ -1,7 +1,7 @@
 import type { AgentMessage, AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 import { aiFetch } from '../fetch'
 import { httpBodyDetail } from '../http-error'
-import { gensparkAttributionHeaders } from '../providers'
+import { gensparkAttributionHeaders, opencodeSessionHeaders } from '../providers'
 import type { AiChatResponse, AiProviderConfig } from '../types'
 import { createStreamWatchdog, type StreamWatchdog } from '../watchdog'
 import {
@@ -138,6 +138,7 @@ async function anthropicTurn(
         // allowed". This header is the official opt-in for browser/Electron environments.
         'anthropic-dangerous-direct-browser-access': 'true',
         ...gensparkAttributionHeaders(baseUrl),
+        ...opencodeSessionHeaders(baseUrl, cb.sessionId),
       },
       body: JSON.stringify({
         model: config.model,
@@ -227,6 +228,15 @@ async function anthropicTurn(
       throw new Error(sseErrorText(event.error, 'Claude stream error'))
     }
   }
+  // Buffered tool arguments can take minutes; a gateway dropping the connection
+  // meanwhile is a billed in-progress turn, not the replayable empty stream below.
+  if (pendingTools.size > 0 && !stopReason) {
+    const received = [...pendingTools.values()].reduce((n, p) => n + p.json.length, 0)
+    throw new Error(
+      `Claude stream closed while sending tool arguments (${received} chars received); the connection was dropped. ` +
+        'If this recurs on a large request (e.g. generating a whole document), ask for the output in several smaller parts.',
+    )
+  }
   const lastTool = completedTools.at(-1)
   if (stopReason === 'max_tokens' && lastTool) lastTool.truncated = true
   for (const call of completedTools) cb.onToolCall(call)
@@ -259,6 +269,7 @@ export async function chatAnthropic(
       // Fetch in the Electron main process goes through Chromium's network stack; this header avoids 403.
       'anthropic-dangerous-direct-browser-access': 'true',
       ...gensparkAttributionHeaders(baseUrl),
+      ...opencodeSessionHeaders(baseUrl),
     },
     body: JSON.stringify({
       model: config.model,

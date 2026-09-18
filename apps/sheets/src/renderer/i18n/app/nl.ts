@@ -131,7 +131,6 @@ export const nl = {
   appMoreItems: '+{count} meer…',
   appTruncationNote: 'Eerste {shown} van {total}',
   appGoToButtonTitle: 'Ga naar (⌘G)',
-  appNameBoxTitle: 'Naamvak — typ een adres of naam en druk op Enter',
   appPivotChartHintIn: 'Een draaigrafiek maken op basis van de huidige draaitabel',
   appPivotChartHintOut:
     'Selecteer eerst een cel in de uitvoer van de draaitabel en kies dan een grafiektype',
@@ -326,14 +325,14 @@ export const nl = {
   appDialogCancel: 'Annuleren',
   appPivotSheetNoMove:
     'Dit werkblad bevat een draaitabel — bereiken verplaatsen wordt nog niet ondersteund.',
+  appMergeOverTable:
+    'De selectie overlapt een Excel-tabel — cellen samenvoegen in een tabel wordt nog niet ondersteund.',
   appTableFilterNoEdit:
     'Het filter van dit werkblad hoort bij een Excel-tabel — de bewerking kan nog niet worden opgeslagen.',
   appAutofillStreaming:
     'Automatisch doorvoeren naar een gebied dat nog streamend wordt geladen, is nog niet toegestaan.',
   appDvNeedsIndexed:
     'Voor het bewerken van gegevensvalidatie moet dit werkblad eerst volledig geïndexeerd zijn — probeer het zo opnieuw.',
-  appDuplicateNeedsFullLoad:
-    'Het dupliceren van een werkblad vereist de volledig geladen modus — deze werkmap is te groot en wordt gedeeltelijk streamend geladen.',
   appPivotSheetNoDuplicate:
     'Dit werkblad bevat een draaitabel — dupliceren wordt nog niet ondersteund.',
   appDuplicateScopedNames:
@@ -554,6 +553,12 @@ export const nl = {
   appPdfCanceled: 'PDF-export geannuleerd.',
   appPdfExported: '{path} geëxporteerd.',
   appPdfExportFailed: 'Kan de PDF niet exporteren.',
+  appPrintPreparing: 'Afdrukken voorbereiden…',
+  appPrintSent: 'Naar de printer verzonden.',
+  appPrintCanceled: 'Afdrukken geannuleerd.',
+  appPrintFailed: 'Kan niet afdrukken.',
+  appPrintNeedsFullLoad:
+    'Afdrukken vereist dat de werkmap volledig is geladen. Wacht tot het laden is voltooid.',
   appCsvExportNeedsFullLoad:
     'CSV-export vereist een volledig geladen werkmap — wacht tot het laden is voltooid.',
   appCsvExportTooLarge: 'Het blad is te groot om als CSV te exporteren.',
@@ -591,6 +596,8 @@ export const nl = {
     'Wijzigingen aan gedefinieerde namen kunnen niet samen met rij-/kolom- of bladstructuurwijzigingen worden opgeslagen — sla in twee stappen op.',
   appSaveErrChangedOnDisk:
     'Het bestand is op schijf gewijzigd door een ander programma — opslaan afgebroken; open het bestand opnieuw en probeer het nog eens.',
+  appSaveErrTargetLocked:
+    'Het bestand kon niet worden vervangen — het lijkt vergrendeld door een ander programma (geopend in Excel, of wordt gescand/gesynchroniseerd). Sluit het daar en sla opnieuw op.',
   appSaveErrStylesheetLimited:
     'Het stylesheet van deze werkmap mist de basisstructuur; stijlwijzigingen kunnen niet worden opgeslagen.',
   appSaveErrPackageGuard:
@@ -648,6 +655,9 @@ export const nl = {
     'Werkmap volledig geladen — formules worden live opnieuw berekend, rijen/kolommen bewerkbaar.',
   appRangeMustBeVector: '{range} moet één rij of één kolom cellen zijn.',
   appRangeTooManyCells: '{range} beslaat meer dan {max} cellen.',
+  appCopyLoadingRange: '{range} wordt geladen om te kopiëren…',
+  appCopyValuesOnly:
+    '{range} alleen als waarden gekopieerd ({cells} cellen): opmaak blijft alleen tot {max} cellen behouden.',
   appSheetStillIndexing: 'Het werkblad wordt nog geïndexeerd — probeer het zo opnieuw.',
   appPrintNothing: 'Het werkblad bevat niets om af te drukken.',
   appPrintTooLarge:
@@ -1343,6 +1353,8 @@ export const nl = {
   appFormatMenu: 'Opmaak',
   appRowHeight: 'Rijhoogte',
   appColWidth: 'Kolombreedte',
+  appAutoFitRowHeight: 'Rijhoogte automatisch aanpassen',
+  appAutoFitColWidth: 'Kolombreedte automatisch aanpassen',
   appRowHeightLabel: 'Rijhoogte (punten)',
   appColWidthLabel: 'Kolombreedte (tekens)',
   appDeleteRow: 'Rij verwijderen',

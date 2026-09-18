@@ -125,7 +125,6 @@ export const ar = {
   appMoreItems: '+{count} عنصرًا آخر…',
   appTruncationNote: 'أول {shown} من {total}',
   appGoToButtonTitle: 'الانتقال إلى (⌘G)',
-  appNameBoxTitle: 'مربع الاسم — اكتب عنوانًا أو اسمًا ثم اضغط Enter',
   appPivotChartHintIn: 'إنشاء مخطط PivotChart من الجدول المحوري الحالي',
   appPivotChartHintOut: 'حدد أولاً خلية داخل ناحية إخراج الجدول المحوري ثم اختر نوع المخطط',
   appChartColumn: 'عمودي',
@@ -303,12 +302,11 @@ export const ar = {
     'هذا المصنف كبير جدًا بحيث لا يمكن تحميله بالكامل في الذاكرة؛ التصفية غير متاحة لهذا الملف.',
   appDialogCancel: 'إلغاء',
   appPivotSheetNoMove: 'تحتوي هذه الورقة على جدول محوري — نقل النطاقات غير مدعوم بعد.',
+  appMergeOverTable: 'التحديد يتداخل مع جدول Excel — دمج الخلايا داخل الجدول غير مدعوم حتى الآن.',
   appTableFilterNoEdit: 'عامل تصفية هذه الورقة يخص جدول Excel — لا يمكن حفظ تعديلاته بعد.',
   appAutofillStreaming: 'التعبئة التلقائية في ناحية لا تزال قيد التحميل بالبث غير مسموح بها بعد.',
   appDvNeedsIndexed:
     'يتطلب تحرير التحقق من صحة البيانات فهرسة الورقة بالكامل أولاً — أعد المحاولة لاحقًا.',
-  appDuplicateNeedsFullLoad:
-    'يتطلب تكرار الورقة وضع التحميل الكامل — هذا المصنف كبير جدًا ومحمّل جزئيًا بالبث.',
   appPivotSheetNoDuplicate: 'تحتوي هذه الورقة على جدول محوري — تكرارها غير مدعوم بعد.',
   appDuplicateScopedNames:
     'تحتوي هذه الورقة على أسماء معرفة على مستوى الورقة — تكرارها غير مدعوم بعد.',
@@ -503,6 +501,11 @@ export const ar = {
   appPdfCanceled: 'أُلغي تصدير PDF.',
   appPdfExported: 'تم التصدير: {path}.',
   appPdfExportFailed: 'يتعذر تصدير PDF.',
+  appPrintPreparing: 'جارٍ التحضير للطباعة…',
+  appPrintSent: 'تم الإرسال إلى الطابعة.',
+  appPrintCanceled: 'تم إلغاء الطباعة.',
+  appPrintFailed: 'يتعذر الطباعة.',
+  appPrintNeedsFullLoad: 'تتطلب الطباعة تحميل المصنف بالكامل — يرجى انتظار انتهاء التحميل.',
   appCsvExportNeedsFullLoad: 'يتطلب تصدير CSV مصنفًا محمّلاً بالكامل — انتظر حتى ينتهي التحميل.',
   appCsvExportTooLarge: 'الورقة كبيرة جدًا ولا يمكن تصديرها بتنسيق CSV.',
   appCsvExportCanceled: 'أُلغي تصدير CSV.',
@@ -535,6 +538,8 @@ export const ar = {
     'لا يمكن حفظ تغييرات الأسماء المعرفة مع تغييرات الصفوف/الأعمدة أو بنية الأوراق — احفظ على مرتين.',
   appSaveErrChangedOnDisk:
     'عدّل برنامج آخر الملف على القرص — أُوقف الحفظ؛ أعد فتح الملف ثم حاول مجددًا.',
+  appSaveErrTargetLocked:
+    'تعذّر استبدال الملف — يبدو أنه مقفل بواسطة برنامج آخر (مفتوح في Excel أو قيد الفحص/المزامنة). أغلقه هناك ثم احفظ مجددًا.',
   appSaveErrStylesheetLimited:
     'تفتقر ورقة أنماط هذا المصنف إلى البنية الأساسية، فلا يمكن حفظ تغييرات الأنماط.',
   appSaveErrPackageGuard: 'سيغيّر الحفظ بنية حزمة المصنف — أُوقف لحماية الملف.',
@@ -586,6 +591,9 @@ export const ar = {
     'حُمّل المصنف بالكامل — تُعاد الصيغ للحساب مباشرة والصفوف والأعمدة قابلة للتحرير.',
   appRangeMustBeVector: 'يجب أن يكون {range} صفًا واحدًا أو عمودًا واحدًا من الخلايا.',
   appRangeTooManyCells: 'يغطي {range} أكثر من {max} خلية.',
+  appCopyLoadingRange: 'جارٍ تحميل {range} للنسخ…',
+  appCopyValuesOnly:
+    'تم نسخ {range} كقيم فقط ({cells} خلية): يُحتفظ بالتنسيقات حتى {max} خلية فقط.',
   appSheetStillIndexing: 'الورقة لا تزال قيد الفهرسة — أعد المحاولة لاحقًا.',
   appPrintNothing: 'لا يوجد في الورقة ما يمكن طباعته.',
   appPrintTooLarge:
@@ -1275,6 +1283,8 @@ export const ar = {
   appFormatMenu: 'تنسيق',
   appRowHeight: 'ارتفاع الصف',
   appColWidth: 'عرض العمود',
+  appAutoFitRowHeight: 'احتواء تلقائي لارتفاع الصف',
+  appAutoFitColWidth: 'احتواء تلقائي لعرض العمود',
   appRowHeightLabel: 'ارتفاع الصف (نقاط)',
   appColWidthLabel: 'عرض العمود (أحرف)',
   appDeleteRow: 'حذف صف',

@@ -46,6 +46,7 @@ import { applyCase, type CaseMode } from '../editor/case-transform'
 import { setParagraphDirection, setSelectionAlign } from '../editor/direction'
 import { setInactiveSelectionShown } from '../editor/inactive-selection'
 import { stepParagraphIndent } from '../editor/indent'
+import { beginForeignPaste, defaultPasteMode, stashPastePayload } from '../editor/paste-options'
 import { formatNumber } from '../editor/numbering'
 import type { InkTool } from '../editor/ink'
 import type { RibbonFormatState } from './ribbon-format-state'
@@ -76,6 +77,7 @@ import {
   type ViewMode,
   insertImageFromDataUrl,
   applyParagraphStyle,
+  setParaAttrs,
 } from './ribbon-tabs'
 import { WRAP_OPTIONS } from './ContextMenu'
 import { CropDialog, CutoutDialog } from './PictureDialogs'
@@ -198,6 +200,8 @@ interface RibbonProps {
   /** References → footnotes / endnotes / citations */
   onInsertNote: (kind: 'footnote' | 'endnote') => void
   sources: SourceInfo[]
+  /** footnotes/endnotes hold Zotero citation fields the bridge cannot see yet */
+  zoteroNoteFields?: boolean
   onAddSource: (source: SourceInfo) => void
   /** TOC page-number backfill: docHeadings in document order → real page numbers (null when not computable) */
   headingPages?: () => number[] | null
@@ -653,6 +657,7 @@ function RibbonInner({
   onInkClearAll,
   onInsertNote,
   sources,
+  zoteroNoteFields,
   onAddSource,
   headingPages,
   zoom,
@@ -716,7 +721,8 @@ function RibbonInner({
   const docEmpty = !hasDoc || fs.docEmpty
   const [tab, setTab] = useState<RibbonTab>('home')
   const [dropdown, setDropdown] = useState<string | null>(null)
-  const [penColor, setPenColor] = useState('C00000')
+  // null = Automatic: the pen button clears the run colour instead of writing one
+  const [penColor, setPenColor] = useState<string | null>('C00000')
   const [penHighlight, setPenHighlight] = useState('yellow')
   const [painter, setPainter] = useState<PainterState | null>(null)
   const fontStepRef = useRef<{
@@ -1376,23 +1382,9 @@ function RibbonInner({
     else setTextStyle({ fontAscii: name })
   }
 
-  /** apply paragraph-level attrs to every block type in the selection */
+  /** apply paragraph-level attrs to every paragraph in the selection (textbox sub-editor included) */
   const setParaAttr = (attrs: Record<string, unknown>) => {
-    if (sub) {
-      // textbox paragraphs only support alignment; other keys are ignored
-      chain().updateAttributes('docParagraph', attrs).run()
-      setDropdown(null)
-      return
-    }
-    let c = chain()
-      .updateAttributes('docParagraph', attrs)
-      .updateAttributes('docHeading', attrs)
-      .updateAttributes('docListItem', attrs)
-    // alignment also applies to selected images (w:jc on the image paragraph)
-    if ('align' in attrs) {
-      c = c.updateAttributes('docProtected', { imageAlign: attrs.align ?? null })
-    }
-    c.run()
+    if (canEdit) setParaAttrs(ed, attrs)
     setDropdown(null)
   }
 
@@ -1601,13 +1593,13 @@ function RibbonInner({
     // level / list numbering / styleId) — which then applies to whole target
     // paragraphs. A PARTIAL in-paragraph drag copies character formatting
     // only — but a selection covering the paragraph's ENTIRE content counts
-    // as including the ¶ mark, exactly like Word's triple-click (alpha ledger
-    // r134: "select whole paragraph → painter" dropped line spacing/indents
-    // while a caret pickup carried them — backwards to any user).
+    // as including the ¶ mark, exactly like Word's triple-click ("select whole
+    // paragraph → painter" dropped line spacing/indents while a caret pickup
+    // carried them — backwards to any user).
     const { $to } = state.selection
     const coversWholeParagraph =
       !empty &&
-      $from.parent.isTextblock && // AllSelection's parent is the doc (bugbot)
+      $from.parent.isTextblock && // AllSelection's parent is the doc
       $from.sameParent($to) &&
       $from.parentOffset === 0 &&
       $to.parentOffset === $to.parent.content.size
@@ -1848,6 +1840,12 @@ function RibbonInner({
           if (item.types.includes('text/html')) {
             const html = await (await item.getType('text/html')).text()
             if (html) {
+              // arm the foreign-paste handshake exactly like a Ctrl+V — the
+              // synthetic pasteHTML never fires the DOM paste handler, so
+              // ribbon pastes skipped the paste mode and the r181 fill
+              if (beginForeignPaste(html)) {
+                stashPastePayload({ html, text, mode: defaultPasteMode() })
+              }
               ed.view.pasteHTML(html, pasteEvent(html, text))
               ed.commands.focus()
               return
@@ -2208,6 +2206,42 @@ function RibbonInner({
                   </span>
                   <span>{t('ribbonReplacePicture')}</span>
                 </button>
+                <div className="rb-col">
+                  <button
+                    className="rb-small"
+                    disabled={!canEdit}
+                    onClick={() => rotatePicture(90)}
+                  >
+                    <IconRotateRight size={18} />
+                    <span>{t('ribbonRotateRight')}</span>
+                  </button>
+                  <button
+                    className="rb-small"
+                    disabled={!canEdit}
+                    onClick={() => rotatePicture(-90)}
+                  >
+                    <IconRotateLeft size={18} />
+                    <span>{t('ribbonRotateLeft')}</span>
+                  </button>
+                </div>
+                <div className="rb-col">
+                  <button
+                    className={fs.imageFlipH ? 'rb-small active' : 'rb-small'}
+                    disabled={!canEdit}
+                    onClick={() => flipPicture('h')}
+                  >
+                    <IconFlipH size={18} />
+                    <span>{t('ribbonFlipH')}</span>
+                  </button>
+                  <button
+                    className={fs.imageFlipV ? 'rb-small active' : 'rb-small'}
+                    disabled={!canEdit}
+                    onClick={() => flipPicture('v')}
+                  >
+                    <IconFlipV size={18} />
+                    <span>{t('ribbonFlipV')}</span>
+                  </button>
+                </div>
               </div>
               <div className="ribbon-group-label">{t('ribbonGroupAdjust')}</div>
             </div>
@@ -2266,44 +2300,6 @@ function RibbonInner({
                     {icon}
                   </button>
                 ))}
-              </div>
-              <div className="table-tool-row">
-                <button
-                  className="table-tool-button"
-                  disabled={!canEdit}
-                  data-tip={t('ribbonRotateRight')}
-                  aria-label={t('ribbonRotateRight')}
-                  onClick={() => rotatePicture(90)}
-                >
-                  <IconRotateRight />
-                </button>
-                <button
-                  className="table-tool-button"
-                  disabled={!canEdit}
-                  data-tip={t('ribbonRotateLeft')}
-                  aria-label={t('ribbonRotateLeft')}
-                  onClick={() => rotatePicture(-90)}
-                >
-                  <IconRotateLeft />
-                </button>
-                <button
-                  className={fs.imageFlipH ? 'table-tool-button active' : 'table-tool-button'}
-                  disabled={!canEdit}
-                  data-tip={t('ribbonFlipH')}
-                  aria-label={t('ribbonFlipH')}
-                  onClick={() => flipPicture('h')}
-                >
-                  <IconFlipH />
-                </button>
-                <button
-                  className={fs.imageFlipV ? 'table-tool-button active' : 'table-tool-button'}
-                  disabled={!canEdit}
-                  data-tip={t('ribbonFlipV')}
-                  aria-label={t('ribbonFlipV')}
-                  onClick={() => flipPicture('v')}
-                >
-                  <IconFlipV />
-                </button>
               </div>
               <div className="ribbon-group-label">{t('ribbonGroupArrange')}</div>
             </div>
@@ -2498,7 +2494,7 @@ function RibbonInner({
               <div className="ribbon-group-label">{t('ribbonGroupShading')}</div>
             </div>
             <div className="ribbon-sep" />
-            <div className="table-tool-group">
+            <div className="table-tool-group table-tool-borders">
               <div className="table-tool-grid table-tool-grid-four">
                 <button data-tip={t('ribbonAllBordersTip')} onClick={() => applyCellBorders('all')}>
                   <IconBorderAll />
@@ -3309,13 +3305,14 @@ function RibbonInner({
                       className="rb-icon rb-color-btn"
                       disabled={!canEdit}
                       data-tip={t('ribbonFontColor')}
-                      onClick={() =>
-                        setTextStyle({ color: penColor === '000000' ? null : penColor })
-                      }
+                      onClick={() => setTextStyle({ color: penColor })}
                     >
                       <span className="rb-color-glyph rb-color-glyph-svg">
                         <IconFontColorA />
-                        <span className="rb-color-bar" style={{ background: `#${penColor}` }} />
+                        <span
+                          className="rb-color-bar"
+                          style={{ background: `#${penColor ?? '000000'}` }}
+                        />
                       </span>
                     </button>
                     <button
@@ -3331,11 +3328,11 @@ function RibbonInner({
                         noneLabel={t('ribbonAutomatic')}
                         onPick={(hex) => {
                           if (!hex) {
-                            setPenColor('000000')
+                            setPenColor(null)
                             setTextStyle({ color: null })
                           } else {
                             setPenColor(hex)
-                            setTextStyle({ color: hex === '000000' ? null : hex })
+                            setTextStyle({ color: hex })
                           }
                         }}
                       />
@@ -3788,8 +3785,10 @@ function RibbonInner({
             onTitlePg={onTitlePg}
             evenOddHf={evenOddHf}
             onEvenOddHf={onEvenOddHf}
-            commentCount={commentCount}
-            onShowComments={onShowComments}
+            canComment={canComment}
+            onNewComment={onNewComment}
+            isProtected={isProtected}
+            commentsAllowed={commentsAllowed}
           />
         ) : tab === 'design' ? (
           <DesignTab
@@ -3827,6 +3826,7 @@ function RibbonInner({
             setDropdown={setDropdown}
             onInsertNote={onInsertNote}
             sources={sources}
+            zoteroNoteFields={zoteroNoteFields}
             onAddSource={onAddSource}
             headingPages={headingPages}
           />

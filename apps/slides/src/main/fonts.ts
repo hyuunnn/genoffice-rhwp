@@ -14,7 +14,7 @@
  *     (ja/ko/traditional-zh/serif/mono) with fonts guaranteed on this platform -> if all miss,
  *     return undefined (callers use heuristic metrics).
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -28,6 +28,7 @@ import {
   type RunStyle,
 } from '@genoffice/pptx-render'
 import { classifyCjkScript, classifyCjkScriptByNameScript } from '../shared/cjk-script'
+import { scanFontDirs, type ScanTask } from './font-scan'
 import {
   initShapedMetrics,
   shapedMeasure,
@@ -159,27 +160,20 @@ function appleFontAssetDirs(): string[] {
   return dirs
 }
 
-/** Office cloud-font roots: <root>/<Family Name>/<numeric-id>.ttf — indexed by directory name. */
-function cloudFontRoots(): string[] {
-  const globDirs = (base: string, sub: string): string[] => {
-    try {
-      return readdirSync(base).map((d) => join(base, d, sub))
-    } catch {
-      return []
-    }
-  }
+/** Office cloud-font store: <base>/<cache-id>/CloudFonts/<Family Name>/<numeric-id>.ttf — indexed by directory name. */
+function cloudFontBase(): string | undefined {
   switch (process.platform) {
     case 'darwin':
-      return globDirs(
-        join(homedir(), 'Library/Group Containers/UBF8T346G9.Office/FontCache'),
-        'CloudFonts',
-      )
+      return join(homedir(), 'Library/Group Containers/UBF8T346G9.Office/FontCache')
     case 'win32':
-      return globDirs(join(homedir(), 'AppData/Local/Microsoft/FontCache'), 'CloudFonts')
+      return join(homedir(), 'AppData/Local/Microsoft/FontCache')
     default:
-      return []
+      return undefined
   }
 }
+
+/** Directory scan budget; the FontCache readdir has stalled for minutes on some Macs */
+const SCAN_DEADLINE_MS = 3000
 
 /** Normalize: NFKC (full-width MS -> MS), lowercase, strip spaces/hyphens/underscores. */
 function norm(s: string): string {
@@ -296,6 +290,8 @@ const aliasesOf = (family: string): string[] => ALIAS_MAP.get(norm(family)) ?? [
 const SERIF_RE =
   /serif|roman|garamond|georgia|playfair|didot|bodoni|baskerville|caslon|palatino|antiqua|minion|lora|merriweather|crimson|spectral|charter|literata|song|songti|宋|mincho|明朝|ming|batang|바탕|myeongjo|명조|gungsuh|궁서|細明|標楷|儷宋/i
 const MONO_RE = /mono|courier|consolas|menlo|monaco|code|typewriter/i
+/** Bullet glyphs Arial (WGL4) covers: • ■ □ ▪ ▫ ▲ ► ▼ ◄ ◊ ○ ● ◘ ◙ */
+const SYMBOL_BULLET_GLYPH_RE = /^[•■□▪▫▲►▼◄◊○●◘◙]+$/
 
 // PowerPoint for Mac substitutes EVERY unresolvable family with Calibri regardless of its
 // apparent class — probe decks with fake serif ("Qqzgaramond") / mono ("Zxqvwt Mono Courier")
@@ -600,25 +596,13 @@ class FontRegistry {
   private parsed = new Map<string, OpentypeFontLike | null>()
   private indexed = false
 
-  private scanFlatDir(dir: string): void {
-    let names: string[]
-    try {
-      names = readdirSync(dir)
-    } catch {
-      return
-    }
-    for (const name of names) {
+  private addFlatDir(dir: string, files: string[]): void {
+    for (const name of files) {
       const m = /^(.+)\.(ttf|otf|ttc|otc)$/i.exec(name)
       if (!m) continue
       // Strip the variable-font axis suffix: NotoSansSC[wght].ttf -> notosanssc
       const key = norm(m[1]!.replace(/\[[^\]]*\]$/, ''))
-      const full = join(dir, name)
-      try {
-        if (!statSync(full).isFile()) continue
-      } catch {
-        continue
-      }
-      if (!this.index.has(key)) this.index.set(key, full)
+      if (!this.index.has(key)) this.index.set(key, join(dir, name))
     }
   }
 
@@ -629,40 +613,38 @@ class FontRegistry {
       this.index.set(norm(name), path)
     }
     // System dirs first so same-named Office copies (arial.ttf…) resolve non-private
-    for (const dir of fontDirs()) this.scanFlatDir(dir)
+    const flat = fontDirs()
     if (userFontDir) {
       this.privateDirs.push(userFontDir)
-      this.scanFlatDir(userFontDir)
+      flat.push(userFontDir)
     }
     for (const dir of officeFontDirs()) {
       this.privateDirs.push(dir)
-      this.scanFlatDir(dir)
+      flat.push(dir)
     }
     // One prefix each covers every scanned asset dir for the isPrivate check
     this.privateDirs.push(APPLE_FONT_ASSET_ROOT, APPLE_FONT_SUBSETS, EMBEDDED_FONT_DIR)
-    for (const dir of appleFontAssetDirs()) this.scanFlatDir(dir)
-    for (const root of cloudFontRoots()) {
-      let families: string[]
-      try {
-        families = readdirSync(root)
-      } catch {
-        continue
+    flat.push(...appleFontAssetDirs())
+    const tasks: ScanTask[] = flat.map((dir) => ({ kind: 'flat', dir }))
+    const cloudBase = cloudFontBase()
+    if (cloudBase) tasks.push({ kind: 'cloud', base: cloudBase, sub: 'CloudFonts' })
+    const results = scanFontDirs(tasks, SCAN_DEADLINE_MS)
+    tasks.forEach((task, i) => {
+      const r = results[i]
+      if (!r) return
+      if (task.kind === 'flat' && r.kind === 'flat') {
+        this.addFlatDir(task.dir, r.files)
+        return
       }
-      this.privateDirs.push(root)
-      for (const fam of families) {
-        const dir = join(root, fam)
-        let files: string[]
-        try {
-          files = readdirSync(dir)
-        } catch {
-          continue
+      if (r.kind !== 'cloud') return
+      for (const { root, families } of r.roots) {
+        this.privateDirs.push(root)
+        for (const [fam, paths] of families) {
+          const key = norm(fam)
+          this.cloud.set(key, [...(this.cloud.get(key) ?? []), ...paths])
         }
-        const paths = files.filter((f) => /\.(ttf|otf|ttc|otc)$/i.test(f)).map((f) => join(dir, f))
-        if (!paths.length) continue
-        const key = norm(fam)
-        this.cloud.set(key, [...(this.cloud.get(key) ?? []), ...paths])
       }
-    }
+    })
   }
 
   isPrivate(path: string): boolean {
@@ -743,7 +725,8 @@ class FontRegistry {
     return undefined
   }
 
-  /** Document-embedded face for the requested family: exact style, else degrade to regular. */
+  /** Document-embedded face for the requested family: exact style, degrade to regular, else
+   *  whatever style is embedded (PowerPoint draws a bold-only embed for plain runs too). */
   private tryEmbedded(
     origKey: string,
     style: RunStyle,
@@ -751,7 +734,7 @@ class FontRegistry {
     const perStyle = embeddedFaces.get(origKey)
     if (!perStyle) return undefined
     const want = `${style.bold ? 1 : 0}${style.italic ? 1 : 0}`
-    for (const k of [...new Set([want, `${want[0]}0`, `0${want[1]}`, '00'])]) {
+    for (const k of [...new Set([want, `${want[0]}0`, `0${want[1]}`, '00', ...perStyle.keys()])]) {
       const path = perStyle.get(k)
       if (!path) continue
       const hit = this.loadBest(path, origKey, style, origKey, weightTargetOf(style.fontFamily))
@@ -819,15 +802,29 @@ class FontRegistry {
     // measure/draw a different weight than PowerPoint)
     const wReq = /w([0-9])$/.exec(origKey)?.[1]
     if (wReq) suffixes.unshift(`w${wReq}`)
-    const tryFamily = (family: string) => {
+    // strict: only a face whose own weight/slant matches the request. The alias pass first
+    // looks for a real bold/italic face across every alias (Yu Gothic UI Bold lives in
+    // YuGothB.ttc, not in the first alias YuGothM.ttc) before any alias may degrade to regular.
+    const faceMatches = (font: OpentypeFontLike): boolean => {
+      const w = (font as { tables?: { os2?: { usWeightClass?: number } } }).tables?.os2
+        ?.usWeightClass
+      const ang = (font as { tables?: { post?: { italicAngle?: number } } }).tables?.post
+        ?.italicAngle
+      const isBold = typeof w === 'number' ? w >= 600 : false
+      const isItalic = typeof ang === 'number' ? Math.abs(ang) > 0.01 : false
+      return isBold === style.bold && isItalic === style.italic
+    }
+    const tryFamily = (family: string, strict = false) => {
       const base = norm(family)
       // Try style-variant files first, then fall back to regular (approximate widths still far better than heuristics)
       for (const suf of [...suffixes, '', 'regular']) {
         const path = this.index.get(base + norm(suf))
         if (!path) continue
         const hit = this.loadBest(path, base, style, origKey, reqWeight)
-        if (hit) return { ...hit, family: hit.family || family }
+        if (hit && (!strict || faceMatches(hit.font)))
+          return { ...hit, family: hit.family || family }
       }
+      if (strict) return undefined
       const cloudPaths = this.cloud.get(base)
       if (cloudPaths) {
         const hit = this.loadBestCloud(cloudPaths, base, style, origKey, reqWeight)
@@ -841,10 +838,11 @@ class FontRegistry {
     // font whenever the family is not installed), loses only to a real system hit above
     const embedded = this.tryEmbedded(origKey, style)
     if (embedded) return embedded
-    for (const family of candidates.slice(1, substituteStart)) {
-      const hit = tryFamily(family)
-      if (hit) return hit
-    }
+    for (const strict of style.bold || style.italic ? [true, false] : [false])
+      for (const family of candidates.slice(1, substituteStart)) {
+        const hit = tryFamily(family, strict)
+        if (hit) return hit
+      }
     // Before falling to substitutes: a sub-family request lives inside the base family's
     // cloud dir (Poppins Light -> CloudFonts/Poppins). Requires a face whose family name
     // matches the request exactly, so a shorter dir can never hijack a different family
@@ -1254,6 +1252,13 @@ export function createSystemFontMetrics(): FontMetricsProvider {
     const lacks = (probe: string) => !e || e.font.charToGlyphIndex?.(probe) === 0
     if (style.substScript === 'ko' && /[가-힣]/.test(text) && lacks('가')) return 'Malgun Gothic'
     if (style.substScript === 'ja' && /[぀-ヿ]/.test(text) && lacks('あ')) return 'Yu Gothic'
+    // Geometric bullets the face lacks draw in Arial, PowerPoint's linked symbol font (its ● is
+    // 0.43em whatever the run font; Chromium's per-glyph fallback on macOS lands on a CJK face
+    // with a 0.75em circle, which buSzPts then scales up — seen in an Open Sans deck)
+    if (SYMBOL_BULLET_GLYPH_RE.test(text) && lacks(text[0]!)) {
+      const arial = resolveEntry({ ...style, fontFamily: 'Arial' })
+      if (arial && !arial.substituted && arial.font.charToGlyphIndex?.(text[0]!)) return 'Arial'
+    }
     return undefined
   }
   const withFallback = (style: RunStyle, family: string): RunStyle => {

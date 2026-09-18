@@ -1,8 +1,9 @@
+import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react'
 import { AgentLoop } from '@genoffice/agent-core'
-import type { AiSettings } from '@genoffice/ai-provider'
-import { AiComposer, AiTypingIndicator } from '@genoffice/ui'
+import { imageGenerationAvailable, type AiSettings } from '@genoffice/ai-provider/browser'
+import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
 import { aiLangDirective, t as tGlobal, useI18n } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'
 import sendEnterOn from '../assets/send-enter-on.png'
@@ -57,7 +58,12 @@ interface ChatEntry {
   /** the run failed and this user message was rolled back out of the model context */
   undelivered?: boolean
   tools?: ToolActivity[]
+  /** the passage this user message targeted, frozen at send */
+  scope?: AiScopeQuoteData
 }
+
+/** longest selection excerpt echoed on a user bubble */
+const SCOPE_TEXT_MAX = 200
 
 type Phase = 'thinking' | 'replying' | 'working'
 
@@ -117,12 +123,14 @@ export function AiPanel({
             role: 'user' | 'assistant'
             text: string
             tools?: Array<{ name: string; summary: string; isError?: boolean; output?: string }>
+            scope?: AiScopeQuoteData
           }): Promise<void>
           loadChat(args: { projectId: string; chatId: string; limit?: number }): Promise<
             Array<{
               role: 'user' | 'assistant'
               text: string
               tools?: Array<{ name: string; summary: string; isError?: boolean; output?: string }>
+              scope?: AiScopeQuoteData
             }>
           >
           rebindChat(args: {
@@ -137,6 +145,7 @@ export function AiPanel({
     role: 'user' | 'assistant',
     text: string,
     tools?: ToolActivity[],
+    scope?: AiScopeQuoteData,
   ): void => {
     const ids = chatIdsRef.current
     const store = chatStore()
@@ -157,6 +166,7 @@ export function AiPanel({
               })),
             }
           : {}),
+        ...(scope ? { scope } : {}),
       })
       .catch(() => {
         /* silent */
@@ -198,6 +208,7 @@ export function AiPanel({
               isError: tool.isError,
               output: tool.output,
             })),
+            ...(m.scope ? { scope: m.scope } : {}),
           })),
           ...prev,
         ])
@@ -349,14 +360,9 @@ export function AiPanel({
       deleteTextInsert: (id) => apiRef.current.deleteTextInsert(id),
       editFonts: () => apiRef.current.editFonts(),
       formEdits: () => apiRef.current.formEdits(),
-      applyFormEdit: (v) => apiRef.current.applyFormEdit(v),
-      rotatePages: (idxs, dir) => apiRef.current.rotatePages(idxs, dir),
-      deletePage: (idx) => apiRef.current.deletePage(idx),
+      applyOps: (ops, opts) => apiRef.current.applyOps(ops, opts),
       metadata: () => apiRef.current.metadata(),
-      setMetadata: (meta) => apiRef.current.setMetadata(meta),
       pageOrder: () => apiRef.current.pageOrder(),
-      movePage: (from, to) => apiRef.current.movePage(from, to),
-      reversePages: () => apiRef.current.reversePages(),
       pageGeom: (idx) => apiRef.current.pageGeom(idx),
       listImages: () => apiRef.current.listImages(),
       isImageClaimed: (ref) => apiRef.current.isImageClaimed(ref),
@@ -368,7 +374,8 @@ export function AiPanel({
       deleteImage: (ref) => apiRef.current.deleteImage(ref),
       searchImages: (query, max) => apiRef.current.searchImages(query, max),
       generateImage: (op) => apiRef.current.generateImage(op),
-      gskTools: () => gskLoggedInRef.current && settingsRef.current?.gskToolsEnabled !== false,
+      imageGenAvailable: () =>
+        imageGenerationAvailable(settingsRef.current, gskLoggedInRef.current),
       fetchImage: (url) => apiRef.current.fetchImage(url),
     }
     loopRef.current = new AgentLoop({
@@ -472,18 +479,20 @@ export function AiPanel({
     stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
   }
 
-  const send = (text: string): void => {
+  /** retryScope: null = a retry that had no scope; undefined = capture the live selection */
+  const send = (text: string, retryScope?: AiScopeQuoteData | null): void => {
     const instruction = text.trim()
     const loop = loopRef.current
     if (!instruction || !loop || loop.busy) return
     stickToBottomRef.current = true
-    persistMessage('user', instruction)
+    const scope = retryScope !== undefined ? (retryScope ?? undefined) : selectionScopeQuote()
+    persistMessage('user', instruction, undefined, scope)
     segTextRef.current = ''
     runTextsRef.current = []
     runToolsRef.current = []
     setChat((prev) => [
       ...prev,
-      { role: 'user', text: instruction },
+      { role: 'user', text: instruction, ...(scope ? { scope } : {}) },
       { role: 'assistant', text: '', streaming: true },
     ])
     setPrompt('')
@@ -527,7 +536,7 @@ export function AiPanel({
   const resizeCleanupRef = useRef<(() => void) | null>(null)
   useEffect(() => () => resizeCleanupRef.current?.(), [])
 
-  /** Drag the right edge to resize: the panel is flush with the window's left edge, so width = clientX */
+  /** Drag the inner panel edge to resize from the selected window side. */
   const startResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
     e.preventDefault()
     const resizer = e.currentTarget
@@ -535,7 +544,7 @@ export function AiPanel({
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
     const onMove = (ev: PointerEvent): void => {
-      const w = clampPanelWidth(ev.clientX)
+      const w = clampPanelWidth(aiPanelWidthAtPointer(ev.clientX))
       preferredWidthRef.current = w
       setPanelWidth(w)
     }
@@ -568,6 +577,19 @@ export function AiPanel({
   // scope chip data, read per render (App re-renders on every selection change)
   const scopeSel = api.selection()
   const hasScopeSelection = !!scopeSel && scopeSel.text.trim().length > 0
+
+  const selectionScopeQuote = (): AiScopeQuoteData | undefined => {
+    const sel = api.selection()
+    const text = sel?.text.replace(/\s+/g, ' ').trim() ?? ''
+    if (!sel || !text) return undefined
+    return {
+      label: t('aiScopeSelection', {
+        page: sel.lastPage > sel.page ? `${sel.page}-${sel.lastPage}` : sel.page,
+        words: countWords(text),
+      }),
+      text: text.length > SCOPE_TEXT_MAX ? `${text.slice(0, SCOPE_TEXT_MAX)}…` : text,
+    }
+  }
 
   // the selection can vanish without the × (click-away, another file): close the preview too
   useEffect(() => {
@@ -603,6 +625,10 @@ export function AiPanel({
           Genspark
         </span>
         <div className="ai-panel-header-actions">
+          <AiPanelSideButton
+            lang={lang}
+            onMove={(side) => window.pdfApi.setAiPanelPrefs({ side })}
+          />
           {chat.length > 0 && (
             <button
               className="ai-header-btn"
@@ -619,7 +645,7 @@ export function AiPanel({
             </button>
           )}
           <button
-            className="ai-header-btn"
+            className="ai-header-btn ai-panel-collapse"
             onClick={onCollapse}
             data-tip={t('aiCollapsePanel')}
             aria-label={t('aiCollapsePanel')}
@@ -660,12 +686,16 @@ export function AiPanel({
           if (entry.role === 'user') {
             return (
               <div key={i} className="ai-msg ai-msg-user">
+                {entry.scope && <AiScopeQuote scope={entry.scope} />}
                 <span dir="auto">{entry.text}</span>
                 {entry.undelivered && (
                   <div className="ai-msg-undelivered">
                     {t('aiUndelivered')}
                     {!busy && (
-                      <button className="ai-retry-btn" onClick={() => send(entry.text)}>
+                      <button
+                        className="ai-retry-btn"
+                        onClick={() => send(entry.text, entry.scope ?? null)}
+                      >
                         {t('aiRetry')}
                       </button>
                     )}

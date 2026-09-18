@@ -134,7 +134,6 @@ export const fr = {
   appMoreItems: '+{count} éléments…',
   appTruncationNote: '{shown} premiers sur {total}',
   appGoToButtonTitle: 'Atteindre (⌘G)',
-  appNameBoxTitle: 'Zone Nom — saisissez une adresse ou un nom, puis appuyez sur Entrée',
   appPivotChartHintIn:
     'Créer un graphique croisé dynamique à partir du tableau croisé dynamique actuel',
   appPivotChartHintOut:
@@ -343,14 +342,14 @@ export const fr = {
   appDialogCancel: 'Annuler',
   appPivotSheetNoMove:
     "Cette feuille contient un tableau croisé dynamique — le déplacement de plages n'est pas encore pris en charge.",
+  appMergeOverTable:
+    'La sélection chevauche un tableau Excel — la fusion de cellules dans un tableau n’est pas encore prise en charge.',
   appTableFilterNoEdit:
     'Le filtre de cette feuille appartient à un tableau Excel — sa modification ne peut pas encore être enregistrée.',
   appAutofillStreaming:
     "La recopie automatique vers une zone encore en cours de chargement en flux n'est pas encore autorisée.",
   appDvNeedsIndexed:
     "La modification de la validation des données nécessite que cette feuille soit d'abord entièrement indexée — réessayez dans un instant.",
-  appDuplicateNeedsFullLoad:
-    "La duplication d'une feuille nécessite le mode de chargement complet — ce classeur est trop volumineux et est chargé partiellement en flux.",
   appPivotSheetNoDuplicate:
     "Cette feuille contient un tableau croisé dynamique — sa duplication n'est pas encore prise en charge.",
   appDuplicateScopedNames:
@@ -578,6 +577,12 @@ export const fr = {
   appPdfCanceled: 'Export PDF annulé.',
   appPdfExported: '{path} exporté.',
   appPdfExportFailed: "Impossible d'exporter le PDF.",
+  appPrintPreparing: 'Préparation de l’impression…',
+  appPrintSent: 'Envoyé à l’imprimante.',
+  appPrintCanceled: 'Impression annulée.',
+  appPrintFailed: 'Impression impossible.',
+  appPrintNeedsFullLoad:
+    'L’impression nécessite le chargement complet du classeur ; attendez la fin du chargement.',
   appCsvExportNeedsFullLoad:
     "L'export CSV nécessite un classeur entièrement chargé — attendez la fin du chargement.",
   appCsvExportTooLarge: 'La feuille est trop grande pour être exportée en CSV.',
@@ -615,6 +620,8 @@ export const fr = {
     'Les modifications de noms définis ne peuvent pas être enregistrées avec des changements de lignes/colonnes ou de structure des feuilles — enregistrez en deux fois.',
   appSaveErrChangedOnDisk:
     'Le fichier a été modifié sur le disque par un autre programme — enregistrement interrompu ; rouvrez le fichier puis réessayez.',
+  appSaveErrTargetLocked:
+    "Impossible de remplacer le fichier — il semble verrouillé par un autre programme (ouvert dans Excel, ou en cours d'analyse/synchronisation). Fermez-le puis réenregistrez.",
   appSaveErrStylesheetLimited:
     'La feuille de styles de ce classeur manque de structure de base ; les modifications de style ne peuvent pas être enregistrées.',
   appSaveErrPackageGuard:
@@ -673,6 +680,9 @@ export const fr = {
     'Classeur entièrement chargé — les formules se recalculent en direct, lignes/colonnes modifiables.',
   appRangeMustBeVector: '{range} doit être une seule ligne ou une seule colonne de cellules.',
   appRangeTooManyCells: '{range} couvre plus de {max} cellules.',
+  appCopyLoadingRange: 'Chargement de {range} pour la copie…',
+  appCopyValuesOnly:
+    '{range} copié en valeurs uniquement ({cells} cellules) : les styles ne sont conservés que jusqu’à {max} cellules.',
   appSheetStillIndexing: "La feuille est encore en cours d'indexation — réessayez dans un instant.",
   appPrintNothing: 'Cette feuille ne contient rien à imprimer.',
   appPrintTooLarge:
@@ -1371,6 +1381,8 @@ export const fr = {
   appFormatMenu: 'Format',
   appRowHeight: 'Hauteur de ligne',
   appColWidth: 'Largeur de colonne',
+  appAutoFitRowHeight: 'Ajuster la hauteur de ligne',
+  appAutoFitColWidth: 'Ajuster la largeur de colonne',
   appRowHeightLabel: 'Hauteur de ligne (points)',
   appColWidthLabel: 'Largeur de colonne (caractères)',
   appDeleteRow: 'Supprimer la ligne',

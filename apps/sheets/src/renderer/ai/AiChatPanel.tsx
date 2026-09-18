@@ -1,7 +1,8 @@
+import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import React, { useEffect, useRef, useState } from 'react'
-import { AiComposer, AiTypingIndicator } from '@genoffice/ui'
+import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
 import { GensparkMark } from '../ribbon-icons'
-import type { ChangePlan } from '../../domain/workbook.types'
+import type { ChangePlan } from '@genoffice/xlsx-gateway/domain/workbook.types'
 import { ATTACHMENT_IMAGE_EXTS, type AttachmentMeta } from '../../shared/desktop-api'
 import { useI18n, type TFunc } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'
@@ -105,7 +106,7 @@ function truncateCardName(name: string): string {
 
 /** Name the scope the way the user thinks of it: by column header when the
  *  selection covers whole columns, by range only when it cannot be named. */
-function scopeLabel(range: string, columns: readonly string[] | null, t: TFunc): string {
+export function scopeLabel(range: string, columns: readonly string[] | null, t: TFunc): string {
   if (columns?.length === 1) return t('aiScopeColumn', { name: columns[0] ?? '' })
   if (columns && columns.length > 1) {
     return t('aiScopeColumns', { names: columns.join(', '), count: columns.length })
@@ -204,6 +205,8 @@ export interface AiChatMessage {
   readonly autoApplied?: { readonly opCount: number; readonly undoSteps: number } | undefined
   /** attachments consumed from the composer by this user message (read-only echo chips) */
   readonly attachments?: readonly AttachmentMeta[] | undefined
+  /** the range this user message targeted, frozen at send */
+  readonly scope?: AiScopeQuoteData | undefined
 }
 
 export function AiChatPanel({
@@ -387,7 +390,7 @@ export function AiChatPanel({
   const resizeCleanupRef = useRef<(() => void) | null>(null)
   useEffect(() => () => resizeCleanupRef.current?.(), [])
 
-  /** Drag the right edge to resize: the panel is flush with the window's left edge, so width = clientX; the grid transition is disabled while dragging */
+  /** Drag the inner panel edge to resize from the selected window side. */
   const startResize = (e: React.PointerEvent<HTMLDivElement>): void => {
     e.preventDefault()
     const area = asideRef.current?.closest('.sheet-body') as HTMLElement | null
@@ -399,7 +402,7 @@ export function AiChatPanel({
     document.body.style.userSelect = 'none'
     let width = 0
     const onMove = (ev: PointerEvent): void => {
-      width = clampPanelWidth(ev.clientX)
+      width = clampPanelWidth(aiPanelWidthAtPointer(ev.clientX))
       preferredWidthRef.current = width
       area.style.setProperty('--copilot-width', `${width}px`)
     }
@@ -515,6 +518,10 @@ export function AiChatPanel({
           Genspark
         </span>
         <div className="ai-panel-header-actions">
+          <AiPanelSideButton
+            lang={lang}
+            onMove={(side) => window.desktopApi.setAiPanelPrefs({ side })}
+          />
           {(chat.length > 0 || historicChat.length > 0) && (
             <button
               className="ai-header-btn"
@@ -526,7 +533,7 @@ export function AiChatPanel({
             </button>
           )}
           <button
-            className="ai-header-btn"
+            className="ai-header-btn ai-panel-collapse"
             onClick={onCollapse}
             data-tip={t('aiCollapsePanel')}
             aria-label={t('aiCollapsePanel')}
@@ -542,6 +549,7 @@ export function AiChatPanel({
           <>
             {historicChat.map((entry, i) => (
               <div key={`h${i}`} className={`ai-msg ai-msg-${entry.role} ai-msg-historic`}>
+                {entry.role === 'user' && entry.scope && <AiScopeQuote scope={entry.scope} />}
                 {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
                   <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
                 )}
@@ -573,6 +581,7 @@ export function AiChatPanel({
           >
             {entry.role === 'user' ? (
               <>
+                {entry.scope && <AiScopeQuote scope={entry.scope} />}
                 {entry.attachments && entry.attachments.length > 0 && (
                   <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
                 )}

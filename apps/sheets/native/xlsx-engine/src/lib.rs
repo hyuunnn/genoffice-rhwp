@@ -41,7 +41,7 @@ use worksheet::*;
 use xml_util::*;
 
 pub use visuals::{CellStyle, MediaResult, ThemeFonts, VisualObject};
-use visuals::{ColorContext, SheetVisualSource};
+use visuals::{ColorContext, SheetVisualSource, SourceFormats};
 
 const CHUNK_ROW_COUNT: usize = 256;
 const MAX_RANGE_CELLS: usize = 100_000;
@@ -147,6 +147,7 @@ impl WorkbookSessions {
         let mut sheets = Vec::with_capacity(declarations.len());
         let mut runtimes = Vec::with_capacity(declarations.len());
         let mut visual_sources = Vec::with_capacity(declarations.len());
+        let mut sheet_names = Vec::with_capacity(declarations.len());
 
         for declaration in declarations {
             let target = relationships
@@ -229,6 +230,7 @@ impl WorkbookSessions {
                 row_count = row_count.max(table.range.end_row + 1);
                 column_count = column_count.max(table.range.end_column + 1);
             }
+            sheet_names.push((declaration.name.clone(), worksheet_path.clone()));
             sheets.push(SheetMetadata {
                 id: id.clone(),
                 name: declaration.name,
@@ -279,8 +281,13 @@ impl WorkbookSessions {
                 .map(|style| style.styles_blank_cell(&default_style))
                 .collect(),
         );
-        let visual_objects =
-            visuals::read_visual_objects(&mut archive, &visual_sources, &color_context)?;
+        let mut source_formats = SourceFormats::new(sheet_names, &styles);
+        let visual_objects = visuals::read_visual_objects(
+            &mut archive,
+            &visual_sources,
+            &color_context,
+            &mut source_formats,
+        )?;
         let (defined_names, print_names, scoped_sheets) = read_defined_names(&mut archive)?;
         for (sheet_index, sheet) in sheets.iter_mut().enumerate() {
             if let Some(names) = print_names.get(&sheet_index) {
@@ -581,6 +588,11 @@ impl WorkbookSession {
         } else {
             None
         };
+        let auto_filter_columns = if indexing_complete {
+            index.auto_filter_columns.clone()
+        } else {
+            Vec::new()
+        };
         let data_validations = if indexing_complete {
             index.data_validations.clone()
         } else {
@@ -650,6 +662,7 @@ impl WorkbookSession {
             hyperlinks,
             conditional_rules,
             auto_filter,
+            auto_filter_columns,
             data_validations,
             sheet_protection,
             row_breaks,
@@ -723,6 +736,7 @@ struct SheetIndex {
     hyperlinks: Vec<HyperlinkRecord>,
     conditional_rules: Vec<ConditionalRule>,
     auto_filter: Option<MergedRange>,
+    auto_filter_columns: Vec<FilterColumnCriteria>,
     data_validations: Vec<DataValidationRule>,
     sheet_protection: Option<SheetProtectionInfo>,
     row_breaks: Vec<usize>,

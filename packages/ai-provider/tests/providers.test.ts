@@ -22,6 +22,8 @@ describe('defaultAiSettings', () => {
       expect(settings.providers[meta.id].model).toBe(meta.defaultModel)
     }
     expect(settings.providers.custom.baseUrl).toBe('')
+    expect(settings.providers.codex.cliPath).toBe('')
+    expect(settings.providers.codex.model).toBe('')
     expect(settings.providers.anthropic.baseUrl).toBeUndefined()
   })
 
@@ -33,13 +35,21 @@ describe('defaultAiSettings', () => {
 })
 
 describe('provider model catalog', () => {
-  it('offers DeepSeek Vision Exp only through the direct BYOK provider', () => {
+  it('offers DeepSeek V4.1 Flash directly and drops the retired Vision Exp id', () => {
     const genspark = AI_PROVIDERS.find((provider) => provider.id === 'genspark')!
     const deepseek = AI_PROVIDERS.find((provider) => provider.id === 'deepseek')!
 
-    expect(deepseek.models).toContain('deepseek-v4-flash-vision-exp')
+    expect(deepseek.models).toContain('deepseek-flash')
+    expect(deepseek.models).not.toContain('deepseek-v4-flash')
+    expect(deepseek.models).not.toContain('deepseek-v4-flash-vision-exp')
     expect(genspark.models).not.toContain('deep-seek-v4-flash')
     expect(genspark.models).not.toContain('deep-seek-v4-flash-vision-exp-openrouter')
+  })
+
+  it('serves DeepSeek V4.1 Flash through the Genspark proxy under its hyphenated pool id', () => {
+    const genspark = AI_PROVIDERS.find((provider) => provider.id === 'genspark')!
+    expect(genspark.models).toContain('deep-seek-v4.1-flash')
+    expect(genspark.models).not.toContain('deep-seek-v4-pro')
   })
 
   it('keeps Responses-only models out of the OpenCode tiers (no such protocol yet)', () => {
@@ -50,6 +60,24 @@ describe('provider model catalog', () => {
       for (const model of meta.models) {
         expect(model).not.toMatch(/^(gpt-|grok-|muse-spark-)/)
       }
+    }
+  })
+
+  it('seeds Requesty with managed policy ids (short names, no vendor prefix)', () => {
+    const requesty = AI_PROVIDERS.find((provider) => provider.id === 'requesty')!
+    expect(requesty.models).toContain(requesty.defaultModel)
+    expect(requesty.needsBaseUrl).toBeUndefined()
+    for (const model of requesty.models) {
+      expect(model).not.toContain('/')
+    }
+  })
+
+  it('seeds Opper with pool ids (bare names, no vendor prefix)', () => {
+    const opper = AI_PROVIDERS.find((provider) => provider.id === 'opper')!
+    expect(opper.models).toContain(opper.defaultModel)
+    expect(opper.needsBaseUrl).toBeUndefined()
+    for (const model of opper.models) {
+      expect(model).not.toContain('/')
     }
   })
 })
@@ -109,7 +137,17 @@ describe('resolveAiSettings', () => {
       },
       defaultAiSettings(),
     )
-    expect(resolved.providers.deepseek).toEqual({ apiKey: 'sk-user', model: 'deepseek-v4-flash' })
+    expect(resolved.providers.deepseek).toEqual({ apiKey: 'sk-user', model: 'deepseek-flash' })
+  })
+
+  it('rewrites the retired V4 Flash id and the Genspark pool spelling to deepseek-flash', () => {
+    for (const model of ['deepseek-v4-flash', 'deep-seek-v4.1-flash']) {
+      const resolved = resolveAiSettings(
+        { providers: { deepseek: { apiKey: 'sk-user', model } } as never },
+        defaultAiSettings(),
+      )
+      expect(resolved.providers.deepseek.model).toBe('deepseek-flash')
+    }
   })
 
   it('rewrites genspark model ids the proxy no longer serves', () => {
@@ -172,7 +210,7 @@ describe('resolveAiSettings', () => {
       },
       defaultAiSettings(),
     )
-    expect(resolved.providers.deepseek.model).toBe('deepseek-v4-flash')
+    expect(resolved.providers.deepseek.model).toBe('deepseek-flash')
   })
 
   it('trims the legacy single-endpoint key and base URL too', () => {
@@ -263,6 +301,39 @@ describe('activeProvider', () => {
     settings.providers.custom.baseUrl = 'http://localhost:11434/v1'
     settings.providers.custom.model = 'llama3'
     expect(activeProvider(settings)).toBe('custom')
+  })
+
+  it('auto-discovers Codex without an API key and preserves an optional override', () => {
+    const settings = defaultAiSettings()
+    settings.provider = 'codex'
+    expect(activeProvider(settings)).toBe('codex')
+    settings.providers.codex.cliPath = ' C:\\Tools\\codex.exe '
+    expect(activeProvider(settings)).toBe('codex')
+
+    const resolved = resolveAiSettings(
+      { providers: { codex: settings.providers.codex } as never },
+      defaultAiSettings(),
+    )
+    expect(resolved.providers.codex.cliPath).toBe('C:\\Tools\\codex.exe')
+    expect(resolved.providers.codex.apiKey).toBe('')
+  })
+
+  it('treats whitespace-only keys, URLs, and models as unconfigured', () => {
+    const settings = defaultAiSettings()
+    settings.provider = 'kimi'
+    settings.providers.kimi.apiKey = '   '
+    expect(activeProvider(settings)).toBe('genspark')
+    settings.providers.kimi.apiKey = 'sk-user'
+    settings.providers.kimi.model = '  '
+    expect(activeProvider(settings)).toBe('genspark')
+    settings.providers.kimi.model = 'kimi-k2'
+    expect(activeProvider(settings)).toBe('kimi')
+
+    const custom = defaultAiSettings()
+    custom.provider = 'custom'
+    custom.providers.custom.baseUrl = '   '
+    custom.providers.custom.model = 'my-model'
+    expect(activeProvider(custom)).toBe('genspark')
   })
 
   it('falls back to genspark for unknown ids from a hand-edited settings file', () => {

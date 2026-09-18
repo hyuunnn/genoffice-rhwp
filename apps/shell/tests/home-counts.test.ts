@@ -54,6 +54,26 @@ describe('home visible counts', () => {
     expect(page.entries.map((entry) => entry.path)).toEqual([bookPath, macroPath])
   })
 
+  it('counts legacy .xls under the sheets (xlsx) filter', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shell-counts-'))
+    tempDirs.push(dir)
+    const bookPath = join(dir, 'book.xlsx')
+    const legacyPath = join(dir, 'legacy.xls')
+    const docPath = join(dir, 'notes.docx')
+    writeFileSync(bookPath, 'sheet')
+    writeFileSync(legacyPath, 'sheet')
+    writeFileSync(docPath, 'doc')
+
+    const page = pageRecentPaths(
+      [bookPath, legacyPath, docPath],
+      { ext: 'xlsx', offset: 0, limit: 50 },
+      new Set(),
+    )
+
+    expect(page.total).toBe(2)
+    expect(page.entries.map((entry) => entry.path)).toEqual([bookPath, legacyPath])
+  })
+
   it('keeps unavailable paths listed at their position, flagged missing (r158)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'shell-counts-'))
     tempDirs.push(dir)
@@ -95,6 +115,26 @@ describe('recent query ext normalization', () => {
     const page = pageRecentPaths([bookPath], { ext: '.XLSX', limit: 50 }, new Set())
     expect(page.total).toBe(1)
     expect(page.entries.map((entry) => entry.path)).toEqual([bookPath])
+  })
+
+  it('shares the sheets/html families with the starred view (same helper)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shell-counts-'))
+    tempDirs.push(dir)
+    const htmPath = join(dir, 'page.htm')
+    const htmlPath = join(dir, 'page.html')
+    const legacyPath = join(dir, 'legacy.xls')
+    writeFileSync(htmPath, 'html')
+    writeFileSync(htmlPath, 'html')
+    writeFileSync(legacyPath, 'sheet')
+    // pageRecentPaths is the recents helper; starred now calls the same
+    // matchesExtFamily, so assert the family includes both spellings
+    expect(
+      pageRecentPaths([htmPath, legacyPath], { ext: 'html', limit: 50 }, new Set()).total,
+    ).toBe(1)
+    expect(
+      pageRecentPaths([htmPath, legacyPath], { ext: 'xlsx', limit: 50 }, new Set()).total,
+    ).toBe(1)
+    expect(pageRecentPaths([htmlPath], { ext: 'htm', limit: 50 }, new Set()).total).toBe(0)
   })
 })
 

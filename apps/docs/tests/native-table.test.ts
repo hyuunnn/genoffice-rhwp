@@ -12,7 +12,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import { parseDocx, saveDocx } from '@genoffice/docx-engine'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildDocx } from '../../../packages/docx-engine/tests/helpers/build-docx'
 import {
   blocksToPmDoc,
@@ -22,6 +22,7 @@ import {
 } from '../src/renderer/editor/convert'
 import { editorExtensions, rowHeightCss, tableRowEatCss } from '../src/renderer/editor/extensions'
 import { renderTableSpec } from '../src/renderer/editor/protected-render'
+import { collectRevisions, type TrackChangesStorage } from '../src/renderer/editor/revisions'
 import {
   constrainSelectedTableWidth,
   constrainTableWidthAtCell,
@@ -63,7 +64,114 @@ async function openTable(): Promise<{
   return { editor, parsed, source }
 }
 
+function selectLastCellTextEnd(editor: Editor): void {
+  let lastCellTextEnd = 0
+  editor.state.doc.descendants((node, pos) => {
+    if (node.isText && node.text === 'D') lastCellTextEnd = pos + node.nodeSize
+  })
+  editor.view.dispatch(
+    editor.state.tr.setSelection(TextSelection.create(editor.state.doc, lastCellTextEnd)),
+  )
+}
+
+function pressKey(editor: Editor, key: string): void {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+  editor.view.someProp('handleKeyDown', (handler) => handler(editor.view, event))
+}
+
+function clickBelowTrailingTable(editor: Editor): void {
+  const event = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'target', { value: editor.view.dom })
+  vi.spyOn(editor.view, 'posAtCoords').mockReturnValue({
+    pos: editor.state.doc.content.size,
+    inside: -1,
+  })
+  editor.view.someProp('handleClick', (handler) =>
+    handler(editor.view, editor.state.doc.content.size, event),
+  )
+}
+
 describe('native editable tables', () => {
+  it('allows typing after an imported trailing table', async () => {
+    const { editor } = await openTable()
+    selectLastCellTextEnd(editor)
+    vi.spyOn(editor.view, 'endOfTextblock').mockImplementation((dir) => dir === 'down')
+    vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ left: 0, right: 0, top: 0, bottom: 0 })
+
+    pressKey(editor, 'ArrowDown')
+
+    expect(editor.state.doc.lastChild?.type.name).toBe('docParagraph')
+    expect(editor.state.doc.lastChild?.content.size).toBe(0)
+    expect(editor.state.selection).toBeInstanceOf(TextSelection)
+    expect(editor.state.selection.$from.parent.type.name).toBe('docParagraph')
+
+    editor.commands.insertContent('below')
+
+    expect(editor.state.doc.lastChild?.type.name).toBe('docParagraph')
+    expect(editor.state.doc.lastChild?.textContent).toBe('below')
+    editor.destroy()
+  })
+
+  it('clicking below an imported trailing table places a text cursor in a new paragraph', async () => {
+    const { editor } = await openTable()
+
+    clickBelowTrailingTable(editor)
+
+    expect(editor.state.doc.lastChild?.type.name).toBe('docParagraph')
+    expect(editor.state.doc.lastChild?.content.size).toBe(0)
+    expect(editor.state.selection).toBeInstanceOf(TextSelection)
+    expect(editor.state.selection.$from.parent.type.name).toBe('docParagraph')
+
+    editor.commands.insertContent('below-click')
+
+    expect(editor.state.doc.lastChild?.textContent).toBe('below-click')
+    editor.destroy()
+  })
+
+  it('does not add a second paragraph when clicking below a trailing table with one already', async () => {
+    const { editor } = await openTable()
+    const pos = editor.state.doc.content.size
+    const paragraph = editor.schema.nodes.docParagraph.create()
+    const transaction = editor.state.tr.insert(pos, paragraph)
+    editor.view.dispatch(transaction.setSelection(TextSelection.create(transaction.doc, pos + 1)))
+    const childCount = editor.state.doc.childCount
+
+    clickBelowTrailingTable(editor)
+
+    expect(editor.state.doc.childCount).toBe(childCount)
+    expect(editor.state.doc.lastChild?.type.name).toBe('docParagraph')
+    editor.destroy()
+  })
+
+  it('exiting a trailing table under track changes records no revision', async () => {
+    const { editor } = await openTable()
+    const storage = editor.storage.trackChanges as TrackChangesStorage
+    storage.enabled = true
+    storage.author = 'Tester'
+
+    clickBelowTrailingTable(editor)
+
+    expect(editor.state.doc.lastChild?.type.name).toBe('docParagraph')
+    expect(collectRevisions(editor.state.doc)).toHaveLength(0)
+    editor.destroy()
+  })
+
+  it('undoing a trailing-table exit does not recreate its paragraph', async () => {
+    const { editor } = await openTable()
+    selectLastCellTextEnd(editor)
+    vi.spyOn(editor.view, 'endOfTextblock').mockImplementation((dir) => dir === 'down')
+    vi.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ left: 0, right: 0, top: 0, bottom: 0 })
+
+    pressKey(editor, 'ArrowDown')
+    expect(editor.state.doc.lastChild?.type.name).toBe('docParagraph')
+
+    expect(editor.commands.undo()).toBe(true)
+
+    expect(editor.state.doc.lastChild?.type.name).toBe('docTable')
+    expect(editor.state.doc.childCount).toBe(1)
+    editor.destroy()
+  })
+
   it('redistributes requested column widths within the section content box', () => {
     expect(fitColumnWidths([200, 200, 200], new Map([[0, 500]]), 600)).toEqual([500, 50, 50])
     const many = fitColumnWidths(new Array(20).fill(100), new Map([[0, 1000]]), 600)
@@ -78,7 +186,7 @@ describe('native editable tables', () => {
     expect(json.content?.[0].type).toBe('docTable')
     expect(json.content?.[0].content?.[0].content?.[0]).toMatchObject({
       type: 'docTableCell',
-      attrs: { fill: 'D9EAF7', bold: true, color: '1F4E78', colspan: 1, rowspan: 1 },
+      attrs: { fill: 'D9EAF7', bold: false, color: null, colspan: 1, rowspan: 1 },
     })
     expect(json.content?.[0].content?.[0].content?.[0].content?.[0].content?.[0].marks).toEqual([
       { type: 'bold' },
@@ -93,8 +201,16 @@ describe('native editable tables', () => {
           csFont: null,
           charSpacingTwips: null,
           charScaleEm: null,
+          charScaleX: null,
           highlight: null,
           shading: null,
+          shadingDisplay: null,
+          textOutline: null,
+          textEffect: null,
+          dstrike: null,
+          glow: null,
+          positionHalfPoints: null,
+          bdr: null,
           vertAlign: null,
           em: null,
           boldOff: null,
@@ -366,6 +482,22 @@ describe('native editable tables', () => {
       'width:min(1200px,calc(var(--doc-content-w,100%) + var(--doc-margin-right,0px) - 96.7px))',
     )
     expect(spec[1].style).toContain('margin-left:96.7px')
+    // a negative indent hangs into the left margin and widens the spill by as much
+    editor.view.dispatch(
+      editor.state.tr.setNodeMarkup(0, undefined, {
+        ...table.attrs,
+        widthPx: 1200,
+        indentTwips: -714,
+      }),
+    )
+    const hanging = editor.schema.nodes.docTable.spec.toDOM!(editor.state.doc.firstChild!) as [
+      string,
+      Record<string, string>,
+    ]
+    expect(hanging[1].style).toContain(
+      'width:min(1200px,calc(var(--doc-content-w,100%) + var(--doc-margin-right,0px) + 47.6px))',
+    )
+    expect(hanging[1].style).toContain('margin-left:-47.6px')
     editor.destroy()
   })
 

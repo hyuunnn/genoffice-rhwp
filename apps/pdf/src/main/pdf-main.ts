@@ -22,10 +22,12 @@ import {
   printHtmlToPdf,
   safeExternalUrl,
   showOpenDialogWithMemory,
+  installRendererProtocol,
+  registerRendererScheme,
+  rendererUrl,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang } from '@genoffice/i18n'
-import { gskGenerateImage, hasGskAuth } from '@genoffice/ai-search'
-import { cloudToolsEnabled, type AiSettings } from '@genoffice/ai-provider'
+import { generateImageTool } from '@genoffice/ai-search'
 import { PDF_CHANNELS } from '../shared/ipc'
 import type {
   ExportImagesRequest,
@@ -323,6 +325,23 @@ const tDlg = createI18n({
     btnDontSave: 'Nie zapisuj',
     btnCancel: 'Anuluj',
   },
+  cs: {
+    dlgExportImages: 'Exportovat obrázky do složky',
+    dlgExtract: 'Extrahovat stránky jako PDF',
+    dlgInsert: 'Vyberte PDF k importu',
+    dlgSplit: 'Rozdělit PDF do složky',
+    dlgMerge: 'Vyberte soubory PDF ke sloučení',
+    dlgMergeSave: 'Uložit sloučený PDF jako',
+    dlgMergePages: 'Uložit sloučené stránky jako',
+    dlgReplace: 'Vyberte náhradní PDF',
+    dlgSplitPages: 'Uložit rozdělené stránky jako',
+    filterPdf: 'Dokumenty PDF',
+    closeUnsavedMsg: 'Tento PDF obsahuje neuložené změny.',
+    closeUnsavedDetail: 'Chcete je před zavřením uložit?',
+    btnSave: 'Uložit',
+    btnDontSave: 'Neukládat',
+    btnCancel: 'Zrušit',
+  },
   nl: {
     dlgExportImages: 'Afbeeldingen naar map exporteren',
     dlgExtract: "Pagina's extraheren als PDF",
@@ -475,10 +494,10 @@ function sanitizeGeneratedDocumentTitle(title: string): string {
   return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : 'Untitled'
 }
 
-function uniqueGeneratedMarkdownPath(dir: string, title: string): string {
+function uniqueGeneratedTextPath(dir: string, title: string, ext: 'md' | 'html'): string {
   const stem = sanitizeGeneratedDocumentTitle(title)
-  let candidate = join(dir, `${stem}.md`)
-  for (let i = 2; existsSync(candidate); i += 1) candidate = join(dir, `${stem}-${i}.md`)
+  let candidate = join(dir, `${stem}.${ext}`)
+  for (let i = 2; existsSync(candidate); i += 1) candidate = join(dir, `${stem}-${i}.${ext}`)
   return candidate
 }
 
@@ -504,7 +523,8 @@ async function createStandaloneDocument(
       openGeneratedPdf(path)
       return { ok: true, path }
     }
-    const path = uniqueGeneratedMarkdownPath(configuredDefaultSaveDir(app), title)
+    // md / html: the source is the file; standalone has no sibling editor to open it in
+    const path = uniqueGeneratedTextPath(configuredDefaultSaveDir(app), title, request.type)
     await writeFile(path, request.content, 'utf8')
     shell.showItemInFolder(path)
     return { ok: true, path }
@@ -559,6 +579,21 @@ let pdfRenamedHook: ((wc: WebContents, oldPath: string, newPath: string) => void
 /** Called by the shell right after "New PDF" writes the blank file to disk */
 export function markPdfUntitledPath(path: string): void {
   untitledPdfPaths.add(path)
+}
+
+/**
+ * The shell renamed or moved the file this view shows (home Folders / Files
+ * pane): re-key every per-view record and tell the renderer, so the next save
+ * writes to the new location instead of recreating the old one.
+ */
+export function pdfFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
+  const wcId = contents.id
+  if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
+  const allowed = allowedByWc.get(wcId)
+  if (allowed?.has(oldPath)) allowed.add(newPath)
+  if (saveAsTargetByWc.get(wcId) === oldPath) saveAsTargetByWc.set(wcId, newPath)
+  if (untitledPdfPaths.delete(oldPath)) untitledPdfPaths.add(newPath)
+  if (!contents.isDestroyed()) contents.send(PDF_CHANNELS.fileRenamed, newPath)
 }
 
 export function setPdfRenamedHook(
@@ -794,16 +829,6 @@ function withSignatures(
 }
 
 let ipcRegistered = false
-
-/** live read of the shared ai-settings.json (written by the shell settings pane) */
-function gskCloudToolsOn(): boolean {
-  try {
-    const raw = readFileSync(join(app.getPath('userData'), 'ai-settings.json'), 'utf8')
-    return cloudToolsEnabled(JSON.parse(raw) as Partial<AiSettings>)
-  } catch {
-    return true // no settings file yet = default on
-  }
-}
 
 function registerPdfIpc(): void {
   if (ipcRegistered) return
@@ -1350,28 +1375,11 @@ function registerPdfIpc(): void {
   // slides' ai:generate-image is only registered once a slides view exists, so pdf needs its own
   ipcMain.handle(
     PDF_CHANNELS.generateImage,
-    async (_e, op: { prompt?: unknown; aspectRatio?: unknown }) => {
-      if (!hasGskAuth())
-        return {
-          error: 'Genspark account is not logged in on this machine; ask the user to log in first',
-        }
-      if (!gskCloudToolsOn())
-        return {
-          error:
-            'Genspark cloud tools are turned off in Settings (AI Model); enable them to use this tool',
-        }
-      const prompt = String(op?.prompt ?? '').trim()
-      if (!prompt) return { error: 'prompt must not be empty' }
-      try {
-        const r = await gskGenerateImage({
-          prompt,
-          aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-        })
-        return { url: r.url }
-      } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) }
-      }
-    },
+    (_e, op: { prompt?: unknown; aspectRatio?: unknown }) =>
+      generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
+        prompt: String(op?.prompt ?? ''),
+        aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
+      }),
   )
 
   ipcMain.handle(PDF_CHANNELS.listSignatures, () => withSignatures(async (list) => list))
@@ -1459,13 +1467,13 @@ export function createPdfView(openPath?: string | null): WebContentsView {
     },
   })
   grantAndTrack(view.webContents, openPath)
-  if (runtime.rendererUrl) void view.webContents.loadURL(runtime.rendererUrl)
-  else if (runtime.rendererFile) void view.webContents.loadFile(runtime.rendererFile)
+  void view.webContents.loadURL(rendererUrl(runtime.rendererUrl, 'pdf'))
   return view
 }
 
 /** Standalone window mode: `npm run dev -w @genoffice/pdf`, pdf path passed via argv */
 export function startPdfStandalone(): void {
+  registerRendererScheme()
   installNavigationGuard(app)
   installContextMenu(app, () => contextMenuLabels(getUiLang()))
   configurePdfRuntime({
@@ -1475,6 +1483,7 @@ export function startPdfStandalone(): void {
     createDocument: createStandaloneDocument,
   })
   void app.whenReady().then(() => {
+    installRendererProtocol({ pdf: join(__dirname, '../renderer') })
     registerPdfIpc()
     const win = new BrowserWindow({
       width: 1200,
@@ -1488,8 +1497,7 @@ export function startPdfStandalone(): void {
     })
     const argPath = process.argv.slice(1).find((a) => /\.pdf$/i.test(a) && existsSync(a))
     grantAndTrack(win.webContents, argPath)
-    if (runtime.rendererUrl) void win.loadURL(runtime.rendererUrl)
-    else if (runtime.rendererFile) void win.loadFile(runtime.rendererFile)
+    void win.loadURL(rendererUrl(runtime.rendererUrl, 'pdf'))
   })
   app.on('window-all-closed', () => app.quit())
 }

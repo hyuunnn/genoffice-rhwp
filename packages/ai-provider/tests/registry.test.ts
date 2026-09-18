@@ -3,6 +3,7 @@ import {
   AI_PROVIDER_ADAPTERS,
   getProviderAdapter,
   modelEchoesReasoning,
+  modelHasFixedSampling,
   modelLacksVision,
 } from '../src/registry'
 import { AI_PROVIDERS, GENSPARK_LLM_BASE_URLS } from '../src/providers'
@@ -62,8 +63,8 @@ describe('provider registry', () => {
     })
   })
 
-  it('marks the GPT-5 family as fixed-sampling (rejects any non-default temperature)', () => {
-    for (const model of ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.5', 'gpt-5.4-mini']) {
+  it('marks the GPT-5/GPT-6 families as fixed-sampling (reject any non-default temperature)', () => {
+    for (const model of ['gpt-6-astra', 'gpt-5.6', 'gpt-5.6-terra', 'gpt-5.5', 'gpt-5.4-mini']) {
       expect(AI_PROVIDER_ADAPTERS.openai.resolveEndpoint(config(model))).toEqual({
         protocol: 'openai-compatible',
         baseUrl: 'https://api.openai.com/v1',
@@ -71,6 +72,30 @@ describe('provider registry', () => {
         useMaxCompletionTokens: true,
       })
     }
+  })
+
+  it('marks the OpenAI o-series reasoning models as fixed-sampling', () => {
+    for (const model of ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini']) {
+      expect(AI_PROVIDER_ADAPTERS.openai.resolveEndpoint(config(model))).toEqual({
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        omitTemperature: true,
+        useMaxCompletionTokens: true,
+      })
+    }
+    // Non-reasoning models still carry the configured temperature.
+    expect(AI_PROVIDER_ADAPTERS.openai.resolveEndpoint(config('gpt-4o'))).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.openai.com/v1',
+      useMaxCompletionTokens: true,
+    })
+  })
+
+  it('does not over-match fixed-sampling prefixes (o10, o30, o4-minix)', () => {
+    expect(modelHasFixedSampling('o10')).toBe(false)
+    expect(modelHasFixedSampling('o30')).toBe(false)
+    expect(modelHasFixedSampling('o4-minix')).toBe(false)
+    expect(modelHasFixedSampling('gpt-50')).toBe(false)
   })
 
   it('resolves the catalog additions to their OpenAI-compatible endpoints', () => {
@@ -82,6 +107,8 @@ describe('provider registry', () => {
       ['xai', 'grok-4.6', 'https://api.x.ai/v1'],
       ['mistral', 'mistral-large-latest', 'https://api.mistral.ai/v1'],
       ['openrouter', 'openrouter/auto', 'https://openrouter.ai/api/v1'],
+      ['requesty', 'claude-sonnet-5', 'https://router.requesty.ai/v1'],
+      ['opper', 'claude-sonnet-4-6', 'https://api.opper.ai/v3/compat'],
     ]
     for (const [id, model, baseUrl] of cases) {
       expect(AI_PROVIDER_ADAPTERS[id].resolveEndpoint(config(model))).toEqual({
@@ -184,6 +211,15 @@ describe('provider registry', () => {
     expect(resolve('gemini-3.7-flash').protocol).toBe('openai-compatible')
   })
 
+  it('does not crash the opencode route on a missing model id', () => {
+    const zen = AI_PROVIDER_ADAPTERS['opencode-zen'].resolveEndpoint({
+      apiKey: 'k',
+      model: undefined as unknown as string,
+    })
+    expect(zen.protocol).toBe('openai-compatible')
+    expect(zen.omitTemperature).toBeUndefined()
+  })
+
   it('uses the configured base URL for custom and rejects a missing one', () => {
     expect(
       AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('m', 'http://localhost:1234/v1')),
@@ -195,8 +231,24 @@ describe('provider registry', () => {
 
   it('only genspark authenticates through the gsk login', () => {
     for (const [id, adapter] of Object.entries(AI_PROVIDER_ADAPTERS)) {
-      expect(adapter.capabilities.auth).toBe(id === 'genspark' ? 'gsk-login' : 'api-key')
+      expect(adapter.capabilities.auth).toBe(
+        id === 'genspark' ? 'gsk-login' : id === 'codex' ? 'codex-chatgpt' : 'api-key',
+      )
     }
+  })
+
+  it('routes Codex to the auto-discovered local process bridge', () => {
+    expect(
+      AI_PROVIDER_ADAPTERS.codex.resolveEndpoint({
+        apiKey: '',
+        model: 'gpt-5.6-terra',
+        cliPath: 'C:\\Tools\\codex.exe',
+      }),
+    ).toEqual({ protocol: 'codex-app-server', baseUrl: '' })
+    expect(AI_PROVIDER_ADAPTERS.codex.resolveEndpoint(config('gpt-5.6-terra'))).toEqual({
+      protocol: 'codex-app-server',
+      baseUrl: '',
+    })
   })
 
   it('throws a typed error for ids outside the registry', () => {
@@ -240,6 +292,46 @@ describe('fixed-sampling models on indirect routes', () => {
       omitTemperature: true,
     })
   })
+
+  it('omits temperature for fixed-sampling pools via Opper', () => {
+    const resolve = (model: string) => AI_PROVIDER_ADAPTERS.opper.resolveEndpoint(config(model))
+    for (const model of ['kimi-k3', 'gpt-5.5', 'gemini-3.8-flash', 'openai/gpt-5']) {
+      expect(resolve(model)).toEqual({
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.opper.ai/v3/compat',
+        omitTemperature: true,
+      })
+    }
+    // pool names and pinned vendor routes share the endpoint; sampling is unrestricted here
+    for (const model of ['claude-sonnet-4-6', 'anthropic/claude-sonnet-4-6']) {
+      expect(resolve(model)).toEqual({
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.opper.ai/v3/compat',
+      })
+    }
+  })
+
+  it('omits temperature for fixed-sampling managed policies via Requesty', () => {
+    const resolve = (model: string, baseUrl?: string) =>
+      AI_PROVIDER_ADAPTERS.requesty.resolveEndpoint(config(model, baseUrl))
+    for (const model of ['kimi-k3', 'gpt-5.6-sol', 'gemini-3.7-flash', 'openai/gpt-5.4']) {
+      expect(resolve(model)).toEqual({
+        protocol: 'openai-compatible',
+        baseUrl: 'https://router.requesty.ai/v1',
+        omitTemperature: true,
+      })
+    }
+    // the full-catalog vendor-prefixed ids work as-is on the same endpoint
+    expect(resolve('openai/gpt-4o-mini')).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://router.requesty.ai/v1',
+    })
+    // a stored base URL picks the EU router
+    expect(resolve('claude-sonnet-5', 'https://router.eu.requesty.ai/v1')).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://router.eu.requesty.ai/v1',
+    })
+  })
 })
 
 describe('modelLacksVision', () => {
@@ -248,9 +340,18 @@ describe('modelLacksVision', () => {
     expect(modelLacksVision('deep-seek-v4-flash-baseten')).toBe(true)
     expect(modelLacksVision('deepseek-v4-pro')).toBe(true)
     expect(modelLacksVision('deepseek-v4-flash')).toBe(true)
+    expect(modelLacksVision('deep-seek-v4-pro')).toBe(true)
+    expect(modelLacksVision('deep-seek-v4.1-flash')).toBe(false)
     expect(modelLacksVision('deepseek-v4-flash-vision-exp')).toBe(false)
+    expect(modelLacksVision('deepseek-flash')).toBe(false)
     expect(modelLacksVision('deep-seek-v4-flash-vision-exp-openrouter')).toBe(false)
     expect(modelLacksVision('claude-opus-4-7')).toBe(false)
+  })
+
+  it('matches case-insensitively like its sibling matchers', () => {
+    expect(modelLacksVision('DeepSeek-V4-Pro')).toBe(true)
+    expect(modelLacksVision('DEEPSEEK-V4-FLASH')).toBe(true)
+    expect(modelLacksVision('DeepSeek-V4-Flash-Vision-Exp')).toBe(false)
   })
 })
 
@@ -260,7 +361,65 @@ describe('modelEchoesReasoning', () => {
     expect(modelEchoesReasoning('minimax-m2p7')).toBe(true)
     expect(modelEchoesReasoning('deep-seek-v4-flash')).toBe(true)
     expect(modelEchoesReasoning('deepseek-v4-pro')).toBe(true)
+    expect(modelEchoesReasoning('deepseek-flash')).toBe(true)
     expect(modelEchoesReasoning('gpt-5.6-luna')).toBe(false)
     expect(modelEchoesReasoning('kimi-k3')).toBe(false)
+  })
+})
+
+describe('modelHasFixedSampling case handling', () => {
+  it('matches fixed-sampling families case-insensitively like modelEchoesReasoning does', () => {
+    expect(modelHasFixedSampling('GPT-5.6-sol')).toBe(true)
+    expect(modelHasFixedSampling('KIMI-K3')).toBe(true)
+    expect(modelHasFixedSampling('Gemini-3.7-flash')).toBe(true)
+    expect(modelHasFixedSampling('O1-mini')).toBe(true)
+    expect(modelHasFixedSampling('gpt-4o-mini')).toBe(false)
+  })
+
+  it('omits temperature for upper-case fixed-sampling ids on mirror routes', () => {
+    expect(
+      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('GPT-5.6-terra', 'https://mirror/v1')),
+    ).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://mirror/v1',
+      omitTemperature: true,
+    })
+    expect(AI_PROVIDER_ADAPTERS.openrouter.resolveEndpoint(config('MOONSHOTAI/KIMI-K3'))).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      omitTemperature: true,
+    })
+  })
+
+  it('carries omitTemperature onto every opencode route, including upper-case mirrors', () => {
+    // minimax rides Messages on Go; it is not fixed-sampling, so no flag
+    expect(AI_PROVIDER_ADAPTERS['opencode-go'].resolveEndpoint(config('minimax-m2'))).toEqual({
+      protocol: 'anthropic',
+      baseUrl: 'https://opencode.ai/zen/go',
+    })
+    // upper-case fixed-sampling ids via the Zen openai-compatible route must omit
+    expect(AI_PROVIDER_ADAPTERS['opencode-zen'].resolveEndpoint(config('GPT-5.6-sol'))).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://opencode.ai/zen/v1',
+      omitTemperature: true,
+    })
+    expect(AI_PROVIDER_ADAPTERS['opencode-zen'].resolveEndpoint(config('KIMI-K3'))).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://opencode.ai/zen/v1',
+      omitTemperature: true,
+    })
+    // KIMI prefix check is case-insensitive on opencode routes (all Kimi ids omit there)
+    expect(AI_PROVIDER_ADAPTERS['opencode-go'].resolveEndpoint(config('KIMI-K2.7-code'))).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://opencode.ai/zen/go/v1',
+      omitTemperature: true,
+    })
+    expect(
+      AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('KIMI-K3', 'https://mirror/v1')),
+    ).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://mirror/v1',
+      omitTemperature: true,
+    })
   })
 })

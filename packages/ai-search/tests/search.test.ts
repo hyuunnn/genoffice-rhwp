@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
 import { webSearch, imageSearch } from '../src/index'
+import { searchOptionsFromSettings, testSearchProvider } from '../src/search-tools'
+import { defaultAiSettings } from '@genoffice/ai-provider'
 
 // These cases only test the Serper/DuckDuckGo paths; a local gsk login would take priority, so disable it explicitly
 beforeAll(() => {
@@ -167,17 +169,113 @@ describe('imageSearch (Serper)', () => {
               imageUrl: 'https://gettyimages.com/x.jpg',
               link: 'https://gettyimages.com',
             },
+            {
+              title: 'review',
+              imageUrl: 'https://cdn.example.com/shutterstock-review.png',
+              link: 'https://example.com/review',
+            },
+            {
+              title: 'subdomain',
+              imageUrl: 'https://media.shutterstock.com/y.jpg',
+              link: 'https://media.shutterstock.com',
+            },
           ],
         },
       }
     })
     const r = await imageSearch('cats', 8)
     expect(r.method).toBe('serper')
-    expect(r.images).toHaveLength(1) // getty is filtered out
+    // getty host + shutterstock subdomain filtered out; a mere path
+    // mention of a stock host on an unrelated domain is kept
+    expect(r.images.map((i) => i.title)).toEqual(['good', 'review'])
     expect(r.images[0]).toMatchObject({
       imageUrl: 'https://cdn.example.com/a.jpg',
       width: 800,
       height: 600,
     })
+  })
+})
+
+describe('webSearch (SearchOptions)', () => {
+  it('uses a caller-supplied Serper key instead of the env var', async () => {
+    const seen: string[] = []
+    mockFetch((url, init) => {
+      seen.push(String((init?.headers as Record<string, string>)['X-API-KEY']))
+      return { ok: true, json: { organic: [{ title: 'A', link: 'https://a.com', snippet: 's' }] } }
+    })
+    const r = await webSearch('q', 3, { useGsk: false, serperKey: 'user-key' })
+    expect(r.method).toBe('serper')
+    expect(seen).toEqual(['user-key'])
+  })
+
+  it('tries Tavily first when preferred and never touches Serper on success', async () => {
+    const urls: string[] = []
+    mockFetch((url) => {
+      urls.push(url)
+      return { ok: true, json: { results: [{ title: 'T', url: 'https://t.com', content: 'c' }] } }
+    })
+    const r = await webSearch('q', 3, {
+      useGsk: false,
+      tavilyKey: 'tv',
+      serperKey: 'sp',
+      prefer: 'tavily',
+    })
+    expect(r.method).toBe('tavily')
+    expect(urls).toEqual(['https://api.tavily.com/search'])
+  })
+})
+
+describe('search-tools', () => {
+  it('maps the settings block onto SearchOptions', () => {
+    const base = defaultAiSettings()
+    expect(searchOptionsFromSettings(base)).toEqual({ useGsk: true })
+    expect(searchOptionsFromSettings({ ...base, gskToolsEnabled: false })).toEqual({
+      useGsk: false,
+    })
+    const serper = {
+      ...base,
+      search: {
+        provider: 'serper' as const,
+        providers: { serper: { apiKey: 'k' }, tavily: { apiKey: '' } },
+      },
+    }
+    expect(searchOptionsFromSettings(serper)).toEqual({ useGsk: false, serperKey: 'k' })
+    const tavily = {
+      ...base,
+      search: {
+        provider: 'tavily' as const,
+        providers: { serper: { apiKey: '' }, tavily: { apiKey: 't' } },
+      },
+    }
+    expect(searchOptionsFromSettings(tavily)).toEqual({
+      useGsk: false,
+      tavilyKey: 't',
+      prefer: 'tavily',
+    })
+    // no key → genspark chain
+    const empty = {
+      ...base,
+      search: {
+        provider: 'serper' as const,
+        providers: { serper: { apiKey: '' }, tavily: { apiKey: '' } },
+      },
+    }
+    expect(searchOptionsFromSettings(empty)).toEqual({ useGsk: true })
+  })
+
+  it('reports a rejected key as a failure instead of the silent free fallback', async () => {
+    mockFetch((url) => {
+      if (url.includes('serper')) return { ok: false }
+      return { ok: true, text: '<a class="result__a" href="/l/?uddg=https%3A%2F%2Fx.com">X</a>' }
+    })
+    const bad = await testSearchProvider('serper', 'wrong')
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toMatch(/serper/)
+    mockFetch(() => ({
+      ok: true,
+      json: { organic: [{ title: 'A', link: 'https://a.com', snippet: 's' }] },
+    }))
+    expect(await testSearchProvider('serper', 'right')).toEqual({ ok: true })
+    expect(await testSearchProvider('tavily', '')).toEqual({ ok: false, error: 'API key is empty' })
   })
 })

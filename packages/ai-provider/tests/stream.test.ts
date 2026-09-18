@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentToolCall } from '@genoffice/agent-core'
 import { AiCreditsError, sseLines, streamForProvider } from '../src/stream'
+import { jsonBodyInsteadOfSse } from '../src/protocols/shared'
 import { jsonResponse, okResponse, sseStream } from './test-utils'
 
 afterEach(() => {
@@ -108,7 +109,7 @@ describe('streamForProvider: temperature policy', () => {
 describe('streamForProvider: empty SSE streams surface as errors', () => {
   // A 200 SSE stream with zero text and zero tool calls previously dissolved
   // into an empty "successful" turn; the UI then showed a generic "no content"
-  // message with no diagnostics (alpha rows 36/37)
+  // message with no diagnostics
   it.each([
     ['anthropic', 'claude-sonnet-5', /Claude returned no content/],
     ['gemini', 'gemini-2.5-flash', /Gemini returned no content/],
@@ -413,7 +414,7 @@ describe('streamForProvider: anthropic', () => {
     const { cb } = collector()
     await expect(
       streamForProvider('anthropic', { apiKey: 'k', model: 'm' }, 'sys', [], [], 100, cb),
-    ).rejects.toThrow(/Claude HTTP 403: .*web page instead of an API response/)
+    ).rejects.toThrow(/Claude HTTP 403: .*web page.*instead of an API response/)
   })
 })
 
@@ -894,6 +895,52 @@ describe('streamForProvider: genspark', () => {
       expect(headers['X-Agent-Type']).toBeUndefined()
     }
   })
+
+  it('opencode: sends the renderer session id as x-opencode-session on every route', async () => {
+    for (const [provider, model] of [
+      ['opencode-go', 'kimi-k2.7-code'],
+      ['opencode-go', 'minimax-m3'],
+      ['opencode-zen', 'claude-sonnet-5'],
+      ['opencode-zen', 'gemini-3.7-flash'],
+    ] as const) {
+      const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream([])))
+      vi.stubGlobal('fetch', fetchMock)
+      const { cb } = collector()
+      await streamForProvider(provider, { apiKey: 'k', model }, 'sys', [], [], 100, {
+        ...cb,
+        sessionId: 'tab-42',
+      }).catch(() => {})
+      const headers = fetchMock.mock.calls[0]![1].headers as Record<string, string>
+      expect(headers['x-opencode-session']).toBe('tab-42')
+    }
+  })
+
+  it('opencode: a turn without a renderer session id still carries a session header', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream([])))
+    vi.stubGlobal('fetch', fetchMock)
+    await streamForProvider(
+      'opencode-go',
+      { apiKey: 'k', model: 'kimi-k2.7-code' },
+      'sys',
+      [],
+      [],
+      100,
+      collector().cb,
+    ).catch(() => {})
+    const headers = fetchMock.mock.calls[0]![1].headers as Record<string, string>
+    expect(headers['x-opencode-session']).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('never sends x-opencode-session to other gateways', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream([])))
+    vi.stubGlobal('fetch', fetchMock)
+    await streamForProvider('kimi', { apiKey: 'k', model: 'kimi-k3' }, 'sys', [], [], 100, {
+      ...collector().cb,
+      sessionId: 'tab-42',
+    }).catch(() => {})
+    const headers = fetchMock.mock.calls[0]![1].headers as Record<string, string>
+    expect(headers['x-opencode-session']).toBeUndefined()
+  })
 })
 
 describe('streamForProvider: 200 + non-stream JSON instead of SSE', () => {
@@ -1077,5 +1124,92 @@ describe('streamForProvider: interleaved-thinking reasoning', () => {
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)
     const assistant = body.messages.find((m: { role: string }) => m.role === 'assistant')
     expect('reasoning_content' in assistant).toBe(false)
+  })
+})
+
+describe('streamForProvider: a connection dropped mid tool arguments is not an empty stream', () => {
+  // Tool arguments are buffered upstream; the Genspark gateway closes the SSE
+  // after ~125s of that silence. The turn was billed and in progress, so it
+  // must not match the "(empty stream)" contract that agent-core replays.
+  it('anthropic: open tool_use block with no stop_reason rejects as a dropped connection', async () => {
+    const body = sseStream([
+      'data: {"type":"message_start","message":{}}',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"write_html"}}',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}}',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"html\\":\\"<!doc"}}',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(body)))
+    const { cb, toolCalls } = collector()
+    const run = streamForProvider(
+      'anthropic',
+      { apiKey: 'k', model: 'claude-sonnet-5' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+    )
+    await expect(run).rejects.toThrow(/connection was dropped/)
+    await expect(run).rejects.not.toThrow(/empty stream/)
+    expect(toolCalls).toEqual([])
+  })
+
+  it('openai-compatible: half-received tool arguments with no finish reject as a dropped connection', async () => {
+    const body = sseStream([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"write_html","arguments":"{\\"html\\":"}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"<!doctype"}}]}}]}',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(body)))
+    const { cb, toolCalls } = collector()
+    const run = streamForProvider(
+      'openai',
+      { apiKey: 'k', model: 'gpt-4.1-mini' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+    )
+    await expect(run).rejects.toThrow(/connection was dropped/)
+    await expect(run).rejects.not.toThrow(/empty stream/)
+    expect(toolCalls).toEqual([])
+  })
+
+  it('openai-compatible: complete arguments without a finish reason still flush as a tool call', async () => {
+    const body = sseStream([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"ping","arguments":"{\\"a\\":1}"}}]}}]}',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(body)))
+    const { cb, toolCalls } = collector()
+    await streamForProvider(
+      'openai',
+      { apiKey: 'k', model: 'gpt-4.1-mini' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+    )
+    expect(toolCalls.map((c) => [c.name, c.input])).toEqual([['ping', { a: 1 }]])
+  })
+})
+
+describe('jsonBodyInsteadOfSse', () => {
+  it('detects JSON bodies regardless of Content-Type casing', async () => {
+    const payload = JSON.stringify({ choices: [] })
+    for (const contentType of [
+      'application/json',
+      'Application/JSON',
+      'APPLICATION/JSON; charset=utf-8',
+      'Application/Json; charset=utf-8',
+    ]) {
+      const res = new Response(payload, { status: 200, headers: { 'content-type': contentType } })
+      await expect(jsonBodyInsteadOfSse(res)).resolves.toBe(payload)
+    }
+    const sse = new Response('data: hi\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+    await expect(jsonBodyInsteadOfSse(sse)).resolves.toBeNull()
   })
 })

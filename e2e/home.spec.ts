@@ -13,8 +13,9 @@ test.describe('home screen', () => {
       await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
       await expect(page.locator('.quick-card').nth(2)).toContainText('AI Slides')
       await expect(page.locator('.quick-card').nth(3)).toContainText('AI Markdown')
-      await expect(page.locator('.quick-card').nth(4)).toContainText('AI PDF')
-      await expect(page.locator('.quick-card').nth(5)).toContainText('AI Hangul')
+      await expect(page.locator('.quick-card').nth(4)).toContainText('AI HTML')
+      await expect(page.locator('.quick-card').nth(5)).toContainText('AI PDF')
+      await expect(page.locator('.quick-card').nth(6)).toContainText('AI Hangul')
       await expect(page.locator('.tab-bar .tab-item.tab-home')).toBeVisible()
       await page.screenshot({ path: screenshotPath('home-overview') })
     } finally {

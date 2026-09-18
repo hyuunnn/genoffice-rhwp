@@ -346,8 +346,6 @@ export interface Props {
   /** Push a preset instruction to the AI panel and expand it (autoRun executes immediately) */
   /** slideShot: attach the current slide's rendering so the model sees the page (AI Beautify) */
   onAiPreset: (text: string, opts?: { slideShot?: boolean }) => void
-  /** Annotate the current selection with an AI edit (queued in the AI panel) */
-  onAskSelection: () => void
   /** Insert an element on the current page */
   onInsert: (kind: InsertKind) => void
   /** Shape gallery pick: enter canvas draw mode (crosshair; click = default size, drag = custom, Esc cancels) */
@@ -424,8 +422,12 @@ export interface Props {
   slideSizeKey: '16:9' | '4:3' | null
   /** Element-level paragraph format (bullets/numbering/line spacing) */
   onParagraphFormat: (patch: {
-    bullet?: 'char' | 'number' | 'none'
+    bullet?: 'char' | 'number' | 'blip' | 'none'
     bulletChar?: string
+    bulletFont?: string
+    numType?: string
+    startAt?: number
+    bulletImage?: { base64: string; ext: string }
     bulletHangEmu?: number
     bulletSizePct?: number
     bulletColor?: string
@@ -559,6 +561,10 @@ export interface Props {
   onPictureOpacity?: (opacity: number) => void
   /** Picture: enter cutout (background removal) mode */
   onPictureCutout?: () => void
+  /** Picture: pick a file and swap the image in place */
+  onPictureReplace?: () => void
+  /** Picture: quarter turn (±90°) around its centre */
+  onPictureRotate?: (deltaDeg: -90 | 90) => void
   /** Selected picture's current border (null = none) */
   contextPictureStroke?: { color: string; widthPt: number; dashPreset?: string } | null
   /** Picture border (null clears it) */
@@ -629,7 +635,6 @@ export interface RibbonTabCtx extends Pick<
   | 'onAddSlide'
   | 'onAddSlideWithLayout'
   | 'onAiPreset'
-  | 'onAskSelection'
   | 'onAlign'
   | 'onDirection'
   | 'onArrange'
@@ -717,7 +722,7 @@ export interface RibbonTabCtx extends Pick<
   setSizeOpen: Dispatch<SetStateAction<boolean>>
   setSlideShowFromStart: Dispatch<SetStateAction<boolean>>
   setSlideShowOpen: Dispatch<SetStateAction<boolean>>
-  setTableCustom: Dispatch<SetStateAction<{ r: number; c: number }>>
+  setTableDialogOpen: Dispatch<SetStateAction<boolean>>
   setTableHover: Dispatch<SetStateAction<{ r: number; c: number }>>
   setTableOpen: Dispatch<SetStateAction<boolean>>
   sizeDraft: string | null
@@ -726,7 +731,7 @@ export interface RibbonTabCtx extends Pick<
   slideShowFromStart: boolean
   slideShowOpen: boolean
   t: ReturnType<typeof useI18n>['t']
-  tableCustom: { r: number; c: number }
+  tableDialogOpen: boolean
   tableHover: { r: number; c: number }
   tableOpen: boolean
 }

@@ -83,8 +83,10 @@ export const ko = {
   appPgNumAppliesTo: '; {n}구역에 적용',
   // Export PDF
   appExportingPdf: 'PDF 내보내는 중…',
+  appExportingHtml: 'HTML 내보내는 중…',
   appExportPdf: 'PDF 내보내기',
   appExportPdfFailed: 'PDF 내보내기 실패: {error}',
+  appExportHtmlFailed: 'HTML 내보내기 실패: {error}',
   appPrintGroupFailed: '페이지 그룹 인쇄 실패',
   appPrintTitle: '인쇄',
   appPrintProgress: '인쇄 준비 중…',
@@ -100,9 +102,15 @@ export const ko = {
   appPrintPrevPage: '이전 페이지',
   appPrintNextPage: '다음 페이지',
   appExportedPdf: 'PDF를 내보냈습니다: {path}',
+  appExportedHtml: 'HTML를 내보냈습니다: {path}',
   appExportedPdfMixed:
     'PDF를 내보냈습니다: {path}(용지 크기 혼합, {n}개 그룹을 페이지 순서로 병합)',
   appExportPdfCanceled: 'PDF 내보내기를 취소했습니다',
+  appExportHtmlCanceled: 'HTML 내보내기를 취소했습니다',
+  appExportingImages: '이미지 내보내는 중…',
+  appExportImagesProgress: '이미지 {count}장 내보내는 중…',
+  appExportImagesDone: '이미지 {count}장을 {dir}에 내보냈습니다',
+  appExportImagesFailed: '이미지 내보내기 실패: {error}',
   appMixedExportOpening:
     '용지 크기가 혼합된 문서: 페이지 미리 보기를 열어 페이지별로 병합하여 내보내는 중…',
   // Comments
@@ -110,6 +118,7 @@ export const ko = {
   appCommentSelectionLost:
     '선택 영역이 더 이상 유효하지 않습니다. 메모를 추가할 텍스트를 다시 선택하세요',
   appCommentAdded: '메모를 추가했습니다. 저장 시 문서에 기록됩니다',
+  appCommentEdited: '메모를 수정했습니다. 저장 시 문서에 기록됩니다',
   appCommentAnchorGone: '원래 메모의 앵커가 더 이상 존재하지 않아 회신할 수 없습니다',
   appCommentReplied: '메모에 회신했습니다. 저장 시 문서에 기록됩니다',
   appCommentResolvedMsg: '메모를 해결했습니다',
@@ -120,6 +129,7 @@ export const ko = {
   appUnknownAuthor: '(작성자 알 수 없음)',
   appResolved: '해결됨',
   appResolvedComments: '해결된 메모 ({n})',
+  appEditComment: '메모 편집',
   appDeleteComment: '메모 삭제',
   appDeleteCommentWithReplies: '메모 삭제(회신 포함)',
   appDeleteReply: '회신 삭제',
@@ -238,6 +248,7 @@ export const ko = {
   // Navigation pane
   appNavTitle: '탐색',
   appNavNoHeadings: '문서에 제목이 없습니다',
+  appNavOutline: '목차',
   // Ruler
   appTabTypeTip: '탭 종류: {type}(클릭하여 전환)',
   appTabStopTitle: '{type} 탭 @ {pos}cm',
@@ -263,6 +274,11 @@ export const ko = {
   appCopy: '복사',
   appPaste: '붙여넣기',
   appPastePlain: '텍스트만 붙여넣기',
+  appPasteOptions: '붙여넣기 옵션',
+  appPasteKeepSource: '원본 서식 유지',
+  appPasteMergeFormat: '서식 병합',
+  appPasteTextOnly: '텍스트만 유지',
+  appPasteRememberDefault: '항상 이 선택 사용',
   appFontMenu: '글꼴…',
   appParagraphMenu: '단락…',
   appUpdateField: '필드 업데이트',
@@ -284,6 +300,10 @@ export const ko = {
   appLangGerman: '독일어',
   appLangSpanish: '스페인어',
   appWrapTextMenu: '텍스트 줄 바꿈',
+  appViewImage: '이미지 보기',
+  appSaveImageAs: '이미지를 다른 이름으로 저장…',
+  appImgActualSize: '실제 크기',
+  appImgFitWindow: '창에 맞추기',
   appHyperlinkMenu: '하이퍼링크…',
   appNewComment: '새 메모',
   appWrapInline: '텍스트 줄 안',

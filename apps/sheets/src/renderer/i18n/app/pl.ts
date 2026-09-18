@@ -128,7 +128,6 @@ export const pl = {
   appMoreItems: '+{count} więcej…',
   appTruncationNote: 'Pierwsze {shown} z {total}',
   appGoToButtonTitle: 'Przejdź do (⌘G)',
-  appNameBoxTitle: 'Pole nazwy — wpisz adres lub nazwę, a następnie naciśnij Enter',
   appPivotChartHintIn: 'Utwórz wykres przestawny na podstawie bieżącej tabeli przestawnej',
   appPivotChartHintOut:
     'Najpierw zaznacz komórkę w obszarze wyników tabeli przestawnej, a następnie wybierz typ wykresu',
@@ -328,14 +327,14 @@ export const pl = {
   appDialogCancel: 'Anuluj',
   appPivotSheetNoMove:
     'Ten arkusz zawiera tabelę przestawną — przenoszenie zakresów nie jest jeszcze obsługiwane.',
+  appMergeOverTable:
+    'Zaznaczenie nachodzi na tabelę programu Excel — scalanie komórek w tabeli nie jest jeszcze obsługiwane.',
   appTableFilterNoEdit:
     'Filtr tego arkusza należy do tabeli programu Excel — edycji nie można jeszcze zapisać.',
   appAutofillStreaming:
     'Autouzupełnianie do obszaru, który wciąż jest ładowany strumieniowo, nie jest jeszcze dozwolone.',
   appDvNeedsIndexed:
     'Edycja poprawności danych wymaga najpierw pełnego zaindeksowania tego arkusza — spróbuj ponownie za chwilę.',
-  appDuplicateNeedsFullLoad:
-    'Duplikowanie arkusza wymaga trybu pełnego ładowania — ten skoroszyt jest zbyt duży i jest ładowany częściowo strumieniowo.',
   appPivotSheetNoDuplicate:
     'Ten arkusz zawiera tabelę przestawną — jego duplikowanie nie jest jeszcze obsługiwane.',
   appDuplicateScopedNames:
@@ -547,6 +546,12 @@ export const pl = {
   appPdfCanceled: 'Anulowano eksport do PDF.',
   appPdfExported: 'Wyeksportowano {path}.',
   appPdfExportFailed: 'Nie można wyeksportować pliku PDF.',
+  appPrintPreparing: 'Przygotowywanie wydruku…',
+  appPrintSent: 'Wysłano do drukarki.',
+  appPrintCanceled: 'Drukowanie anulowane.',
+  appPrintFailed: 'Nie można wydrukować.',
+  appPrintNeedsFullLoad:
+    'Drukowanie wymaga pełnego wczytania skoroszytu — poczekaj na zakończenie wczytywania.',
   appCsvExportNeedsFullLoad:
     'Eksport do CSV wymaga w pełni załadowanego skoroszytu — poczekaj na zakończenie ładowania.',
   appCsvExportTooLarge: 'Arkusz jest za duży, aby wyeksportować go do CSV.',
@@ -584,6 +589,8 @@ export const pl = {
     'Zmian nazw zdefiniowanych nie można zapisać razem ze zmianami wierszy/kolumn ani struktury arkuszy — zapisz w dwóch krokach.',
   appSaveErrChangedOnDisk:
     'Plik został zmieniony na dysku przez inny program — zapisywanie przerwano; otwórz plik ponownie i spróbuj jeszcze raz.',
+  appSaveErrTargetLocked:
+    'Nie można zastąpić pliku — wygląda na zablokowany przez inny program (otwarty w Excelu lub skanowany/synchronizowany). Zamknij go tam i zapisz ponownie.',
   appSaveErrStylesheetLimited:
     'Arkuszowi stylów tego skoroszytu brakuje podstawowej struktury; zmian stylów nie można zapisać.',
   appSaveErrPackageGuard:
@@ -639,6 +646,9 @@ export const pl = {
     'Skoroszyt w pełni załadowany — formuły przeliczają się na żywo, wiersze/kolumny można edytować.',
   appRangeMustBeVector: '{range} musi być pojedynczym wierszem lub pojedynczą kolumną komórek.',
   appRangeTooManyCells: '{range} obejmuje ponad {max} komórek.',
+  appCopyLoadingRange: 'Wczytywanie {range} do skopiowania…',
+  appCopyValuesOnly:
+    '{range} skopiowano tylko jako wartości ({cells} komórek): style są zachowywane tylko do {max} komórek.',
   appSheetStillIndexing: 'Arkusz jest wciąż indeksowany — spróbuj ponownie za chwilę.',
   appPrintNothing: 'Arkusz nie zawiera nic do wydrukowania.',
   appPrintTooLarge:
@@ -1336,6 +1346,8 @@ export const pl = {
   appFormatMenu: 'Format',
   appRowHeight: 'Wysokość wiersza',
   appColWidth: 'Szerokość kolumny',
+  appAutoFitRowHeight: 'Autodopasowanie wysokości wierszy',
+  appAutoFitColWidth: 'Autodopasowanie szerokości kolumn',
   appRowHeightLabel: 'Wysokość wiersza (punkty)',
   appColWidthLabel: 'Szerokość kolumny (znaki)',
   appDeleteRow: 'Usuń wiersz',

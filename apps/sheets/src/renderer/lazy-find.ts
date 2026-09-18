@@ -24,11 +24,13 @@ import {
   type IReplaceAllResult,
 } from '@univerjs/find-replace'
 import { IUniverInstanceService } from '@univerjs/core'
+import { FormulaDataModel } from '@univerjs/preset-sheets-core'
 import { Subject, type Subscription } from 'rxjs'
 import { FILE_READ_BATCH_CELLS, MAX_SCAN_CELLS } from './ai/workbook-search'
 import { t } from './i18n/locale'
+import { installSparseFind, type SpillLookup } from './sparse-find'
 import { netAxisDelta } from './view-transform'
-import type { LazyWorkbookState, UniverRuntime } from './univer-state'
+import { lazySheetMeta, type LazyWorkbookState, type UniverRuntime } from './univer-state'
 import { ensureLazyRangeLoaded, readSheetRangeMapped } from './univer-sync'
 
 /** Same match shape the built-in sheets provider produces (ISheetCellMatch). */
@@ -39,6 +41,10 @@ export interface LazyCellMatch extends IFindMatch {
   /// by Univer's composite model.
   range: { subUnitId: string; range: IRange }
   matchedText?: string | null
+  /// Pre-replacement scalar for out-of-window hits (ScanCell.value): lets the
+  /// replace path write numbers/booleans back with their type instead of the
+  /// stringified display text. Absent for formula hits and inner-model hits.
+  rawValue?: string | number | boolean | null | undefined
 }
 
 export interface LazyCellTexts {
@@ -199,6 +205,7 @@ function makeCellMatch(
     // built-in model); plain cells behave exactly like in-memory ones.
     replaceable: isFormula ? findByFormula : cell.value !== null && cell.value !== undefined,
     matchedText: (findByFormula && isFormula ? cell.formula : scalarToText(cell.value)) ?? null,
+    rawValue: isFormula ? undefined : cell.value,
     range: {
       subUnitId: sheetId,
       range: {
@@ -228,8 +235,19 @@ interface InnerFindModel extends FindModel {
  * extended model. On dispose the adopted providers go back into the service.
  */
 export function installLazyFindBridge(deps: LazyFindBridgeDeps): { dispose(): void } {
-  const service = deps.runtime.univer.__getInjector().get(IFindReplaceService)
+  const injector = deps.runtime.univer.__getInjector()
+  const service = injector.get(IFindReplaceService)
   const providers = service.getProviders()
+  const spills: SpillLookup = (unitId, sheetId) => {
+    try {
+      const bySheet = injector.get(FormulaDataModel).getArrayFormulaRange()?.[unitId]?.[sheetId]
+      return Object.values(bySheet ?? {}).flatMap((row) =>
+        Object.values(row ?? {}).filter((range): range is IRange => Boolean(range)),
+      )
+    } catch {
+      return []
+    }
+  }
   const adopted = new Set<IFindReplaceProvider>()
   let generation = 0
   // Registering only APPENDS to the service's live provider set, and
@@ -243,6 +261,7 @@ export function installLazyFindBridge(deps: LazyFindBridgeDeps): { dispose(): vo
       if (provider === wrapper) continue
       providers.delete(provider)
       adopted.add(provider)
+      installSparseFind(provider, spills)
     }
   }
   const wrapper: IFindReplaceProvider = {
@@ -369,7 +388,7 @@ export class LazyExtendedFindModel extends FindModel {
       // cursor here would walk it — and the reveal subscriber's scroll —
       // through the extras on every streamed patch: with two matches the
       // viewport ping-pongs between them for as long as the stream keeps
-      // mutating (alpha r167). Stay on the current extra if it still exists.
+      // mutating. Stay on the current extra if it still exists.
       const current = this.lastFocusedExtra.range
       const stay = this.currentExtras().find(
         (extra) =>
@@ -385,13 +404,12 @@ export class LazyExtendedFindModel extends FindModel {
       // materialized in the grid and the hit now belongs to the inner
       // session. Hand the cursor over THROUGH the inner model (not by
       // returning the match directly): later Next/Previous/Replace must
-      // continue from this position, not from a stale inner index (bugbot).
+      // continue from this position, not from a stale inner index.
       // With the selection sitting on the cell one stayIfOnMatch call lands
       // there; otherwise walk the inner cursor to the position — never
-      // return an unverified landing (bugbot round 2: that restarted the
-      // cursor walk) and never park a ghost cursor (round 3: a held extra
-      // that currentExtras() dropped skipped the inner session on the next
-      // user nav and could not self-recover).
+      // return an unverified landing (that restarted the cursor walk) and never
+      // park a ghost cursor (a held extra that currentExtras() dropped skipped
+      // the inner session on the next user nav and could not self-recover).
       const samePos = (candidate: IFindMatch | null): candidate is LazyCellMatch => {
         const range = candidate ? (candidate as LazyCellMatch).range : null
         return (
@@ -414,7 +432,7 @@ export class LazyExtendedFindModel extends FindModel {
         // the cursor sits on the taken-over cell (bounded by the list size).
         // stayIfOnMatch must NOT ride along: with the selection on any other
         // in-window hit each step would re-anchor there and never advance
-        // (bugbot round 4).
+        // again.
         let candidate = this.innerNeighbor(direction, {
           noFocus: true,
           ignoreSelection: true,
@@ -735,9 +753,8 @@ export class LazyExtendedFindModel extends FindModel {
           [{ f: replaceAllOccurrences(match.matchedText ?? '', this.query, replaceString) }],
         ])
       } else {
-        target.setValues([
-          [{ v: replaceAllOccurrences(match.matchedText ?? '', this.query, replaceString) }],
-        ])
+        const replaced = replaceAllOccurrences(match.matchedText ?? '', this.query, replaceString)
+        target.setValues([[{ v: coerceReplaceValue(match.rawValue, replaced) }]])
       }
       return true
     } catch {
@@ -776,7 +793,7 @@ export class LazyExtendedFindModel extends FindModel {
       for (const cell of collectJournalMatches(this.state, sheetId, test)) {
         collected.push({ ...cell, sheetId })
       }
-      const meta = this.state.file.sheets.find((candidate) => candidate.id === sheetId)
+      const meta = lazySheetMeta(this.state, sheetId)
       // Sheets added this session live entirely in the journal.
       if (!meta || meta.rowCount <= 0 || meta.columnCount <= 0) {
         this.refreshExtras(collected, comparator, unitId)
@@ -854,6 +871,29 @@ export class LazyExtendedFindModel extends FindModel {
       .sort(comparator)
       .map((cell) => makeCellMatch(unitId, cell.sheetId, cell, findByFormula))
   }
+}
+
+/// Restores the replaced text to the cell's pre-replacement scalar type so
+/// out-of-window Replace All matches the in-window model: numeric cells stay
+/// numeric (SUM keeps counting them), booleans stay boolean, and anything
+/// that no longer parses as the original type falls back to text — the same
+/// outcome as typing the replacement by hand.
+export function coerceReplaceValue(
+  raw: string | number | boolean | null | undefined,
+  replaced: string,
+): string | number | boolean {
+  if (typeof raw === 'number') {
+    if (replaced.trim() === '') return replaced
+    const n = Number(replaced)
+    return Number.isFinite(n) ? n : replaced
+  }
+  if (typeof raw === 'boolean') {
+    const t = replaced.trim().toLowerCase()
+    if (t === '1' || t === 'true') return true
+    if (t === '0' || t === 'false') return false
+    return replaced
+  }
+  return replaced
 }
 
 /// Substring replacement honoring the query's case sensitivity, replacing

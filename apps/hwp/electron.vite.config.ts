@@ -15,7 +15,7 @@ export default defineConfig({
       exclude: ['@rhwp/editor'],
     },
     server: {
-      port: Number(process.env.HWP_DEV_PORT) || 5178,
+      port: Number(process.env.HWP_DEV_PORT) || 5179,
       strictPort: Boolean(process.env.HWP_DEV_PORT),
     },
   },

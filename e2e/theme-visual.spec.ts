@@ -58,6 +58,38 @@ function minimalPdf(): Buffer {
 }
 
 test.describe('theme visual adoption', () => {
+  test('html editor surface follows dark theme', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'genoffice-theme-html-'))
+    const htmlPath = join(dir, 'doc.html')
+    await writeFile(htmlPath, '<html><body><p>Body.</p></body></html>\n')
+
+    const launched = await launchShell({
+      onboardingSeen: true,
+      videoDir: 'theme-visual-html',
+      openFile: htmlPath,
+    })
+    try {
+      const shellPage = await findShellPage(launched.app)
+      const editorPage = await waitForPageWithUrl(launched.app, '://html/')
+      // preview is the default view; the source pane is what this test measures
+      await editorPage.locator('.rb-view', { hasText: /Source/ }).click()
+      await expect(editorPage.locator('.source-editor .cm-content')).toBeVisible()
+
+      const lightBg = await bodyBg(editorPage)
+      expect(luminance(lightBg)).toBeGreaterThan(180)
+
+      await setTheme(shellPage, 'dark')
+      await expect.poll(async () => luminance(await bodyBg(editorPage))).toBeLessThan(80)
+      const textColor = await editorPage
+        .locator('.source-editor .cm-content')
+        .evaluate((el) => getComputedStyle(el).color)
+      expect(luminance(textColor)).toBeGreaterThan(180)
+      await editorPage.screenshot({ path: screenshotPath('theme-html-dark') })
+    } finally {
+      await closeAndSaveVideo(launched, 'theme-visual-html')
+    }
+  })
+
   test('markdown editor surface follows dark theme', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'genoffice-theme-md-'))
     const mdPath = join(dir, 'doc.md')
@@ -70,7 +102,7 @@ test.describe('theme visual adoption', () => {
     })
     try {
       const shellPage = await findShellPage(launched.app)
-      const editorPage = await waitForPageWithUrl(launched.app, 'markdown/out')
+      const editorPage = await waitForPageWithUrl(launched.app, '://markdown/')
       await expect(editorPage.locator('.doc-editor')).toBeVisible()
 
       const lightBg = await bodyBg(editorPage)
@@ -94,7 +126,7 @@ test.describe('theme visual adoption', () => {
     try {
       const shellPage = await findShellPage(launched.app)
       await shellPage.locator('.quick-card', { hasText: 'AI Docs' }).click()
-      const editorPage = await waitForPageWithUrl(launched.app, 'docs/out')
+      const editorPage = await waitForPageWithUrl(launched.app, '://docs/')
       const page = editorPage.locator('.doc-page').first()
       await expect(page).toBeVisible()
       const pageBg = () => page.evaluate((el) => getComputedStyle(el).backgroundColor)
@@ -145,7 +177,7 @@ test.describe('theme visual adoption', () => {
     try {
       const shellPage = await findShellPage(launched.app)
       await shellPage.locator('.quick-card', { hasText: 'AI Sheets' }).click()
-      const editorPage = await waitForPageWithUrl(launched.app, 'sheets/out')
+      const editorPage = await waitForPageWithUrl(launched.app, '://sheets/')
       await editorPage.waitForSelector('canvas', { timeout: 20_000 })
 
       // Univer flags its dark repaint with a class on <html> (ThemeService.darkMode$)
@@ -185,7 +217,7 @@ test.describe('theme visual adoption', () => {
     })
     try {
       const shellPage = await findShellPage(launched.app)
-      const editorPage = await waitForPageWithUrl(launched.app, 'pdf/out')
+      const editorPage = await waitForPageWithUrl(launched.app, '://pdf/')
       await expect(editorPage.locator('.pdf-page').first()).toBeVisible()
 
       await setTheme(shellPage, 'dark')

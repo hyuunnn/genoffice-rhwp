@@ -169,6 +169,18 @@ const tDlg = createI18n({
     btnDontSave: 'Nie zapisuj',
     btnCancel: 'Anuluj',
   },
+  cs: {
+    dlgSaveTitle: 'Uložit dokument Hangul',
+    filterHwp: 'Dokumenty Hangul',
+    filterHwpx: 'Dokumenty Hangul HWPX',
+    filterHml: 'Dokumenty Hangul HML',
+    untitledFile: 'Hangul bez názvu',
+    closeUnsavedMsg: 'Tento dokument obsahuje neuložené změny.',
+    closeUnsavedDetail: 'Chcete je před zavřením uložit?',
+    btnSave: 'Uložit',
+    btnDontSave: 'Neukládat',
+    btnCancel: 'Zrušit',
+  },
   nl: {
     dlgSaveTitle: 'Hangul-document opslaan',
     filterHwp: 'Hangul-documenten',

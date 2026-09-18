@@ -10,6 +10,7 @@ import { Subject } from 'rxjs'
 
 import {
   buildLazyCellTest,
+  coerceReplaceValue,
   collectJournalMatches,
   coveredByWindow,
   extraComparator,
@@ -599,6 +600,81 @@ describe('installLazyFindBridge', () => {
     bridge.dispose()
   })
 
+  it('visits every same-row match in order and wraps (issue #220)', async () => {
+    // Issue #220's repro: the same word in A10, C10, F10 and H10 of one row
+    // must each surface as an individual stop, with Next cycling through
+    // every occurrence instead of reporting one match per row.
+    const harness = facade(state({}))
+    const inner = new CursorInnerModel([
+      match('s1', 9, 0),
+      match('s1', 9, 2),
+      match('s1', 9, 5),
+      match('s1', 9, 7),
+      match('s1', 12, 1),
+    ])
+    inner.onFocus = (row, column) => {
+      harness.active.row = row
+      harness.active.column = column
+    }
+    const builtin = { find: vi.fn().mockResolvedValue([inner]), terminate: vi.fn() }
+    harness.providers.add(builtin)
+    const bridge = installLazyFindBridge(harness)
+
+    mockRead.mockResolvedValue(mapped([]))
+
+    const models = await harnessLookup(harness)(query({ findString: 'Example' }))
+    const model = models[0]!
+    await vi.waitFor(() => expect(model.getMatches()).toHaveLength(5))
+
+    const move = () => model.moveToNextMatch({ loop: true }) as LazyCellMatch | null
+    const posOf = (m: LazyCellMatch | null) =>
+      `${m!.range.range.startRow}:${m!.range.range.startColumn}`
+    expect(posOf(move())).toBe('9:0')
+    expect(posOf(move())).toBe('9:2')
+    expect(posOf(move())).toBe('9:5')
+    expect(posOf(move())).toBe('9:7')
+    expect(posOf(move())).toBe('12:1')
+    // Full cycle wraps back to the first same-row hit.
+    expect(posOf(move())).toBe('9:0')
+    bridge.dispose()
+  })
+
+  it('walks Previous through every same-row match in reverse (issue #220)', async () => {
+    const harness = facade(state({}))
+    const inner = new CursorInnerModel([
+      match('s1', 9, 0),
+      match('s1', 9, 2),
+      match('s1', 9, 5),
+      match('s1', 9, 7),
+      match('s1', 12, 1),
+    ])
+    inner.onFocus = (row, column) => {
+      harness.active.row = row
+      harness.active.column = column
+    }
+    const builtin = { find: vi.fn().mockResolvedValue([inner]), terminate: vi.fn() }
+    harness.providers.add(builtin)
+    const bridge = installLazyFindBridge(harness)
+
+    mockRead.mockResolvedValue(mapped([]))
+
+    const models = await harnessLookup(harness)(query({ findString: 'Example' }))
+    const model = models[0]!
+    await vi.waitFor(() => expect(model.getMatches()).toHaveLength(5))
+
+    const move = () => model.moveToPreviousMatch({ loop: true }) as LazyCellMatch | null
+    const posOf = (m: LazyCellMatch | null) =>
+      `${m!.range.range.startRow}:${m!.range.range.startColumn}`
+    expect(posOf(move())).toBe('12:1')
+    expect(posOf(move())).toBe('9:7')
+    expect(posOf(move())).toBe('9:5')
+    expect(posOf(move())).toBe('9:2')
+    expect(posOf(move())).toBe('9:0')
+    // Full cycle wraps back to the last hit.
+    expect(posOf(move())).toBe('12:1')
+    bridge.dispose()
+  })
+
   it('keeps file matches findable under style-only journal edits', async () => {
     const journalCells = new Map([
       [
@@ -708,6 +784,62 @@ describe('installLazyFindBridge', () => {
     expect(harness.worksheet.scrollToCell).not.toHaveBeenCalled()
     expect(mockEnsure).not.toHaveBeenCalled()
     bridge.dispose()
+  })
+
+  it('replaceAll on out-of-window hits writes numbers back as numbers', async () => {
+    const harness = facade(state({}))
+    const inner = new FakeInnerModel([])
+    const builtin = { find: vi.fn().mockResolvedValue([inner]), terminate: vi.fn() }
+    harness.providers.add(builtin)
+    const bridge = installLazyFindBridge(harness)
+
+    mockRead.mockResolvedValue(mapped([{ row: 500, column: 3, value: 123 }]))
+
+    const models = await harnessLookup(harness)(query({ findString: '2' }))
+    const model = models[0]!
+    await settle(model)
+    await model.replaceAll('9')
+    // 123 → "193" → numeric 193, so SUM keeps counting it (was text "193" before)
+    expect(harness.setValues).toHaveBeenCalledWith([[{ v: 193 }]])
+    bridge.dispose()
+  })
+
+  it('replaceAll on out-of-window hits writes booleans back as booleans', async () => {
+    const harness = facade(state({}))
+    const inner = new FakeInnerModel([])
+    const builtin = { find: vi.fn().mockResolvedValue([inner]), terminate: vi.fn() }
+    harness.providers.add(builtin)
+    const bridge = installLazyFindBridge(harness)
+
+    mockRead.mockResolvedValue(mapped([{ row: 500, column: 3, value: true }]))
+
+    const models = await harnessLookup(harness)(query({ findString: '1' }))
+    const model = models[0]!
+    await settle(model)
+    await model.replaceAll('0')
+    expect(harness.setValues).toHaveBeenCalledWith([[{ v: false }]])
+    bridge.dispose()
+  })
+})
+
+describe('coerceReplaceValue', () => {
+  it('keeps numbers numeric, falling back to text when the result is not a number', () => {
+    expect(coerceReplaceValue(123, '193')).toBe(193)
+    expect(coerceReplaceValue(123, 'abc')).toBe('abc')
+    expect(coerceReplaceValue(123, '')).toBe('')
+  })
+
+  it('maps 1/0 back to booleans, leaving anything else as text', () => {
+    expect(coerceReplaceValue(true, '0')).toBe(false)
+    expect(coerceReplaceValue(false, '1')).toBe(true)
+    expect(coerceReplaceValue(true, 'TRUE')).toBe(true)
+    expect(coerceReplaceValue(true, 'yes')).toBe('yes')
+  })
+
+  it('leaves strings, nullish and formula-missing raws as text', () => {
+    expect(coerceReplaceValue('abc', 'abd')).toBe('abd')
+    expect(coerceReplaceValue(null, 'x')).toBe('x')
+    expect(coerceReplaceValue(undefined, 'x')).toBe('x')
   })
 })
 
@@ -951,7 +1083,7 @@ describe('research cursor stability (r167)', () => {
     } as IFindMoveParams) as LazyCellMatch
     expect(walked).toBe(innerList[1])
     // walk steps must not carry stayIfOnMatch: with the selection on another
-    // in-window hit the inner model would re-anchor there forever (bugbot)
+    // in-window hit the inner model would re-anchor there forever
     for (const call of innerMove.mock.calls) {
       expect((call[0] as { stayIfOnMatch?: boolean } | undefined)?.stayIfOnMatch).toBe(false)
     }

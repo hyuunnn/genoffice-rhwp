@@ -1,3 +1,5 @@
+import { CellValueType } from '@univerjs/core'
+
 import type {
   WorkbookCellEdit,
   WorkbookBulkConstantFill,
@@ -13,11 +15,13 @@ import type {
   WorkbookVisualEdit,
   WorkbookVisualObject,
 } from '../shared/desktop-api'
-import { columnLabel, parseRange } from '../domain/cell-address'
-import { splitSheetRef } from '../domain/chart-visual'
+import { columnLabel, parseRange } from '@genoffice/xlsx-gateway/domain/cell-address'
+import { fillDisplayColor, resolveStyleColor } from '@genoffice/xlsx-gateway/domain/style-color'
+import { splitSheetRef } from '@genoffice/xlsx-gateway/domain/chart-visual'
 import { CHART_CATEGORY_WIRE_MAX, CHART_TEXT_WIRE_MAX } from '../shared/desktop-api'
-import { ADDABLE_SHAPE_TYPES } from '../shared/shape-types'
+import { ADDABLE_SHAPE_TYPES } from '@genoffice/xlsx-gateway/shared/shape-types'
 import { INDENT_STEP_PX } from './selection-format'
+import type { SharedFormulaResolver } from './shared-formula-journal'
 
 /// Tracks the user's cell edits on a streamed external workbook. Streaming
 /// evicts and re-installs viewport cells, so the journal is both the save
@@ -94,7 +98,7 @@ export type StructuralJournalOp =
       readonly start: number
       readonly end: number
       /// Column default format (Excel select-all semantics): new cells in the
-      /// span inherit it at any row after reopen (alpha ledger r124).
+      /// span inherit it at any row after reopen.
       readonly style: WorkbookStyleEdit
     }
   | {
@@ -223,7 +227,7 @@ export interface PageSetupJournalState {
   showGridlines?: boolean
   /// sheetView/@zoomScale (10-400): normal-view zoom percent. Excel persists
   /// zoom in the file; unjournaled, the post-save session reload snapped the
-  /// view back to the file's stored zoom (alpha r165).
+  /// view back to the file's stored zoom.
   zoomScale?: number
   /// sheetView/@showFormulas: the sheet renders formulas instead of values.
   showFormulas?: boolean
@@ -1216,7 +1220,7 @@ export function shiftVisualForStructuralOp(
 /// `sheetName` (the edited sheet's name) additionally shifts chart series
 /// references held in the journal.
 /// Removes a previously recorded op by identity (undo of a ribbon-recorded
-/// op, e.g. set-col-style — alpha ledger r124/bugbot). No-op if absent.
+/// op, e.g. set-col-style). No-op if absent.
 export function removeStructuralOp(
   journal: EditJournal,
   sheetId: string,
@@ -1550,11 +1554,15 @@ export function journalCellContentAt(
 }
 
 /// Ingests a `sheet.mutation.set-range-values` payload. Returns the entries
-/// that were recorded.
+/// that were recorded. `resolveSharedFormula` materializes shared-formula
+/// followers (`si` with no `f` — tiled paste / fill) into a concrete formula
+/// string; without it such cells journal as plain values and the follow-up
+/// recalc mutation can wipe them entirely.
 export function recordSetRangeValues(
   journal: EditJournal,
   sheetId: string,
   cellValue: unknown,
+  resolveSharedFormula?: SharedFormulaResolver,
 ): JournalEntry[] {
   if (typeof cellValue !== 'object' || cellValue === null) return []
   const recorded: JournalEntry[] = []
@@ -1565,7 +1573,16 @@ export function recordSetRangeValues(
     for (const [columnKey, cell] of Object.entries(rowValue as Record<string, unknown>)) {
       const column = Number(columnKey)
       if (!Number.isInteger(column) || column < 0) continue
-      const entry = mergeIntoJournal(journal, sheetId, row, column, cell)
+      let ingest = cell
+      if (resolveSharedFormula && typeof cell === 'object' && cell !== null) {
+        const data = cell as { f?: unknown; si?: unknown }
+        const hasFormula = typeof data.f === 'string' && data.f.length > 0
+        if (!hasFormula && typeof data.si === 'string' && data.si.length > 0) {
+          const materialized = resolveSharedFormula(row, column, data.si)
+          if (materialized) ingest = { ...cell, f: materialized }
+        }
+      }
+      const entry = mergeIntoJournal(journal, sheetId, row, column, ingest)
       if (entry) recorded.push(entry)
     }
   }
@@ -1710,7 +1727,7 @@ function mergeCellIntoEntry(
     // only an explicit `f: null` (editor overwrite) clears a journaled
     // formula — otherwise the value is just the formula's cached result.
     const isCalculationResult = previous?.formula !== undefined && !('f' in data)
-    const raw = data.v
+    const raw = plainCellValue(data.v, data.t)
     if (isCalculationResult) {
       // keep the journaled formula; the file stores <f> and Excel recalcs
     } else if (raw === null || raw === undefined) {
@@ -1741,6 +1758,16 @@ function mergeCellIntoEntry(
     ...(rich === undefined ? {} : { rich }),
     ...(styleReset ? { styleReset: true } : {}),
   }
+}
+
+/// Univer keeps booleans as `{v: 0|1, t: BOOLEAN}` (set-range-values
+/// normalizes a bare `true` the same way); the file model needs a real
+/// boolean or the save writes a number where Excel had TRUE/FALSE.
+export function plainCellValue(v: unknown, t: unknown): unknown {
+  if (t !== CellValueType.BOOLEAN) return v
+  if (typeof v === 'number') return v !== 0
+  if (typeof v === 'string') return v === '1' || v.toUpperCase() === 'TRUE'
+  return v
 }
 
 /// CSS <family-name>s can't start with a digit unless quoted or escaped, and
@@ -2031,13 +2058,22 @@ export function fromNeutralStyle(style: WorkbookStyleEdit): Record<string, unkno
   if (style.fontFamily !== undefined) s.ff = escapeCssLeadingDigit(style.fontFamily)
   if (style.fontSize !== undefined) s.fs = style.fontSize
   if (style.fontColor !== undefined) {
-    s.cl = style.fontColor === null ? null : { rgb: style.fontColor }
+    s.cl = style.fontColor === null ? null : { rgb: resolveStyleColor(style.fontColor) }
   }
-  if (style.fillColor !== undefined) {
+  // Univer paints one rgb per cell: theme slots resolve through the default
+  // palette, patterns and gradients show their foreground / first stop.
+  const fill =
+    style.fill !== undefined
+      ? style.fill === null
+        ? null
+        : fillDisplayColor(style.fill)
+      : style.fillColor
+  if (fill !== undefined) {
     // Same empty-rgb sentinel as toUniverStyle: a bare bg: null is stripped
     // by the mutation's removeNull, after which a <col style=> fill composes
     // straight back through the cell the user just cleared.
-    s.bg = style.fillColor === null ? { ...NO_FILL_STYLE } : { rgb: style.fillColor }
+    s.bg =
+      fill === null || fill === undefined ? { ...NO_FILL_STYLE } : { rgb: resolveStyleColor(fill) }
   }
   if (style.horizontalAlignment !== undefined) {
     s.ht = XLSX_HORIZONTAL_TO_UNIVER[style.horizontalAlignment]
