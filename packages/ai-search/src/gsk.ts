@@ -17,10 +17,10 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import {
-  COPYRIGHT_HOSTS,
   asRecord,
   firstItem,
   gskProxyUrl,
+  isCopyrightHost,
   safeHost,
   type ImageSearchResult,
   type WebSearchResult,
@@ -146,8 +146,9 @@ export function gskChildEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proce
 // ── Low-level execution ─────────────────────────────────────────────
 
 /**
- * gsk output may have [INFO] log lines mixed in before the JSON; scan from the
- * end for the first line starting with { or [ and parse from there.
+ * gsk output may have [INFO] log lines mixed in before or after the JSON;
+ * scan for a line starting with { or [ and parse the longest valid JSON
+ * block from there, shrinking past any trailing logs.
  */
 export function parseGskOutput(stdout: string): unknown {
   const trimmed = stdout.trim()
@@ -160,10 +161,12 @@ export function parseGskOutput(stdout: string): unknown {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!.trim()
     if (line.startsWith('{') || line.startsWith('[')) {
-      try {
-        return JSON.parse(lines.slice(i).join('\n'))
-      } catch {
-        continue
+      for (let j = lines.length; j > i; j--) {
+        try {
+          return JSON.parse(lines.slice(i, j).join('\n'))
+        } catch {
+          continue
+        }
       }
     }
   }
@@ -249,7 +252,7 @@ export function parseGskImageSearch(raw: unknown, maxResults: number): ImageSear
     const img = asRecord(item)
     const imageUrl = String(img.image_url ?? img.imageUrl ?? '')
     if (!imageUrl) continue
-    if (COPYRIGHT_HOSTS.some((d) => imageUrl.toLowerCase().includes(d))) continue
+    if (isCopyrightHost(imageUrl)) continue
     const width = Number(img.width)
     const height = Number(img.height)
     const entry: ImageSearchResult = {

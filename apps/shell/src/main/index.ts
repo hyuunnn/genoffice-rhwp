@@ -654,6 +654,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: '导出为 PDF…',
+    menuExportImages: '导出为图片…',
     menuExportHtml: '导出为单文件 HTML…',
     menuOpenInDocs: '转换为 Docs 文档并打开',
     menuPrint: '打印…',
@@ -738,6 +739,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Export as PDF…',
+    menuExportImages: 'Export as Images…',
     menuExportHtml: 'Export as Single-File HTML…',
     menuOpenInDocs: 'Convert and Open in Docs',
     menuPrint: 'Print…',
@@ -830,6 +832,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'PDF として書き出す…',
+    menuExportImages: '画像としてエクスポート…',
     menuExportHtml: '単一ファイル HTML として書き出す…',
     menuOpenInDocs: 'Docs 文書に変換して開く',
     menuPrint: '印刷…',
@@ -922,6 +925,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'PDF로 내보내기…',
+    menuExportImages: '이미지로 내보내기…',
     menuExportHtml: '단일 파일 HTML로 내보내기…',
     menuOpenInDocs: 'Docs 문서로 변환하여 열기',
     menuPrint: '인쇄…',
@@ -1013,6 +1017,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Exporter en PDF…',
+    menuExportImages: 'Exporter en images…',
     menuExportHtml: 'Exporter en HTML (fichier unique)…',
     menuOpenInDocs: 'Convertir et ouvrir dans Docs',
     menuPrint: 'Imprimer…',
@@ -1106,6 +1111,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Als PDF exportieren…',
+    menuExportImages: 'Als Bilder exportieren…',
     menuExportHtml: 'Als Einzeldatei-HTML exportieren…',
     menuOpenInDocs: 'In Docs umwandeln und öffnen',
     menuPrint: 'Drucken…',
@@ -1199,6 +1205,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Exportar como PDF…',
+    menuExportImages: 'Exportar como imágenes…',
     menuExportHtml: 'Exportar como HTML de archivo único…',
     menuOpenInDocs: 'Convertir y abrir en Docs',
     menuPrint: 'Imprimir…',
@@ -1292,6 +1299,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'ส่งออกเป็น PDF…',
+    menuExportImages: 'ส่งออกเป็นรูปภาพ…',
     menuExportHtml: 'ส่งออกเป็น HTML ไฟล์เดียว…',
     menuOpenInDocs: 'แปลงและเปิดใน Docs',
     menuPrint: 'พิมพ์…',
@@ -1381,6 +1389,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Ekspor sebagai PDF…',
+    menuExportImages: 'Ekspor sebagai gambar…',
     menuExportHtml: 'Ekspor sebagai HTML satu file…',
     menuOpenInDocs: 'Konversi dan buka di Docs',
     menuPrint: 'Cetak…',
@@ -1474,6 +1483,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Экспортировать в PDF…',
+    menuExportImages: 'Экспорт в изображения…',
     menuExportHtml: 'Экспортировать в один файл HTML…',
     menuOpenInDocs: 'Преобразовать и открыть в Docs',
     menuPrint: 'Печать…',
@@ -1567,6 +1577,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'تصدير بتنسيق PDF…',
+    menuExportImages: 'تصدير كصور…',
     menuExportHtml: 'تصدير كملف HTML واحد…',
     menuOpenInDocs: 'التحويل والفتح في Docs',
     menuPrint: 'طباعة…',
@@ -1656,6 +1667,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Exportar como PDF…',
+    menuExportImages: 'Exportar como imagens…',
     menuExportHtml: 'Exportar como HTML de arquivo único…',
     menuOpenInDocs: 'Converter e abrir no Docs',
     menuPrint: 'Imprimir…',
@@ -1749,6 +1761,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Esporta come PDF…',
+    menuExportImages: 'Esporta come immagini…',
     menuExportHtml: 'Esporta come HTML a file singolo…',
     menuOpenInDocs: 'Converti e apri in Docs',
     menuPrint: 'Stampa…',
@@ -1842,6 +1855,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Eksportuj jako PDF…',
+    menuExportImages: 'Eksportuj jako obrazy…',
     menuExportHtml: 'Eksportuj jako pojedynczy plik HTML…',
     menuOpenInDocs: 'Konwertuj i otwórz w Docs',
     menuPrint: 'Drukuj…',
@@ -1935,6 +1949,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Exportovat jako PDF…',
+    menuExportImages: 'Exportovat jako obrázky…',
     menuExportHtml: 'Exportovat jako samostatné HTML…',
     menuOpenInDocs: 'Převést a otevřít v Docs',
     menuPrint: 'Tisk…',
@@ -2026,6 +2041,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Exporteren als PDF…',
+    menuExportImages: 'Exporteren als afbeeldingen…',
     menuExportHtml: 'Exporteren als één HTML-bestand…',
     menuOpenInDocs: 'Converteren en openen in Docs',
     menuPrint: 'Afdrukken…',
@@ -2119,6 +2135,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'Eksport sebagai PDF…',
+    menuExportImages: 'Eksport sebagai imej…',
     menuExportHtml: 'Eksport sebagai HTML fail tunggal…',
     menuOpenInDocs: 'Tukar dan buka dalam Docs',
     menuPrint: 'Cetak…',
@@ -2211,6 +2228,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'ייצוא כ-PDF…',
+    menuExportImages: 'ייצוא כתמונות…',
     menuExportHtml: 'ייצוא כ-HTML בקובץ יחיד…',
     menuOpenInDocs: 'המרה ופתיחה ב-Docs',
     menuPrint: 'הדפסה…',
@@ -2301,6 +2319,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: 'PDF के रूप में निर्यात…',
+    menuExportImages: 'छवियों के रूप में निर्यात…',
     menuExportHtml: 'एकल-फ़ाइल HTML के रूप में निर्यात…',
     menuOpenInDocs: 'Docs में बदलें और खोलें',
     menuPrint: 'प्रिंट करें…',
@@ -2394,6 +2413,7 @@ const tMain = createI18n({
     menuNewHwp: 'AI Hangul',
     menuNewPdf: 'AI PDF',
     menuExportPdf: '匯出為 PDF…',
+    menuExportImages: '匯出為圖片…',
     menuExportHtml: '匯出為單檔 HTML…',
     menuOpenInDocs: '轉換為 Docs 文件並開啟',
     menuPrint: '列印…',
@@ -3924,8 +3944,14 @@ function broadcastChromePressed(exclude?: WebContents): void {
 function registerTabsIpc(): void {
   ipcMain.on(TABS_CHANNELS.chromePressed, (event) => broadcastChromePressed(event.sender))
   ipcMain.handle(TABS_CHANNELS.list, () => tabManager?.list() ?? [])
-  ipcMain.handle(TABS_CHANNELS.activate, (_event, id: string) => tabManager?.activateTab(id))
-  ipcMain.handle(TABS_CHANNELS.close, (_event, id: string) => tabManager?.closeTab(id))
+  ipcMain.handle(TABS_CHANNELS.activate, (_event, id: unknown) => {
+    if (typeof id !== 'string' || !id) return
+    tabManager?.activateTab(id)
+  })
+  ipcMain.handle(TABS_CHANNELS.close, (_event, id: unknown) => {
+    if (typeof id !== 'string' || !id) return
+    tabManager?.closeTab(id)
+  })
   ipcMain.handle(TABS_CHANNELS.reorder, (_event, id: string, toIndex: number) => {
     if (typeof id === 'string' && Number.isInteger(toIndex)) tabManager?.reorderTab(id, toIndex)
   })
@@ -4205,6 +4231,13 @@ function buildMarkdownMenu(): void {
           click: () => {
             const tab = tabManager?.activeMarkdownTab()
             if (tab) sendMarkdownExportRequest(tab.webContents, 'pdf')
+          },
+        },
+        {
+          label: tm('menuExportImages'),
+          click: () => {
+            const tab = tabManager?.activeMarkdownTab()
+            if (tab) sendMarkdownExportRequest(tab.webContents, 'png')
           },
         },
         {
