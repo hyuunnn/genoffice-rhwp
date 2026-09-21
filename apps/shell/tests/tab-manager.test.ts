@@ -598,6 +598,7 @@ describe('file path bookkeeping', () => {
     const sheetsId = manager.openSheetsTab('/real/file')
     const slidesId = manager.openSlidesTab('/real/file')
     const pdfId = manager.openPdfTab('/real/file')
+    const hwpId = manager.openHwpTab('/real/file')
     // markdown/html view factories need electron protocol mocks the shell
     // suite does not provide, so seed their tab records directly: the
     // finders only read kind/view/filePath.
@@ -618,6 +619,7 @@ describe('file path bookkeeping', () => {
     expect(manager.findSheetsTabByPath('/REAL/FILE')).toBe(sheetsId)
     expect(manager.findSlidesTabByPath('/canonical/file')).toBe(slidesId)
     expect(manager.findPdfTabByPath('/REAL/FILE')).toBe(pdfId)
+    expect(manager.findHwpTabByPath('/canonical/file')).toBe(hwpId)
     expect(manager.findMarkdownTabByPath('/canonical/file')).toBe(markdownId)
     expect(manager.findHtmlTabByPath('/REAL/FILE')).toBe(htmlId)
     expect(manager.findDocsTabByPath('/missing')).toBeUndefined()

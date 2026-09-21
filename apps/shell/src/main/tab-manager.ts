@@ -700,8 +700,8 @@ export class TabManager {
       : undefined
   }
 
-  findHwpTabByPath(path: string): string | undefined {
-    return this.tabs.find((t) => t.kind === 'hwp' && t.filePath === path)?.id
+  findHwpTabByPath(path?: string): string | undefined {
+    return this.findTabOfKindByPath('hwp', path)
   }
 
   /** the active tab's hangul view, if the active tab is hangul (hwp menu target) */

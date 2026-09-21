@@ -18,6 +18,8 @@ export default tseslint.config(
       'scripts/drivers/**',
       'apps/*/build/**',
       'packages/*/src/vendor/**',
+      // Self-vendored rhwp-studio is gitignored minified output, not our source.
+      'apps/hwp/vendor/**',
       // Browser-side extractor fragments are function-body slices (top-level
       // return), not modules; they are injected as raw text.
       'packages/html2docx/src/browser/**',
