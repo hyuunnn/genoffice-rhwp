@@ -33,6 +33,7 @@ export const TREE_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
   'xlsm',
   'xls',
   'csv',
+  'tsv',
   'pptx',
   'ppt',
   'pdf',
@@ -102,7 +103,7 @@ export function describeRoot(root: string): FolderRoot {
   } catch {
     usable = false
   }
-  return { path: root, name: basename(root) || root, usable }
+  return { path: root, name: basename(root) || root, usable, readable: usable, removable: false }
 }
 
 function hasVisibleSubfolder(dir: string): boolean {
@@ -146,27 +147,12 @@ export function listFolder(dir: string, starredPaths: ReadonlySet<string>): Fold
   return { dir, folders, files }
 }
 
-/** every supported file under `dir`, recursively (visible folders only) */
-export function collectTreeFiles(dir: string): string[] {
-  const out: string[] = []
-  const walk = (d: string) => {
-    let dirents: import('node:fs').Dirent[]
-    try {
-      dirents = readdirSync(d, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const ent of dirents) {
-      const path = join(d, ent.name)
-      if (ent.isDirectory()) {
-        if (!isHiddenEntry(d, ent.name, true)) walk(path)
-      } else if (ent.isFile() && isSupportedTreeFile(ent.name)) {
-        out.push(path)
-      }
-    }
-  }
-  walk(dir)
-  return out
+/** the candidates below `dir` at any depth; bookkeeping filters tracked paths instead of walking the disk */
+export function pathsUnder(dir: string, candidates: Iterable<string>): string[] {
+  const prefix = resolve(dir) + sep
+  const out = new Set<string>()
+  for (const path of candidates) if (resolve(path).startsWith(prefix)) out.add(path)
+  return [...out]
 }
 
 export interface FolderErrors {
@@ -191,10 +177,14 @@ export function createFolder(parent: string, name: string, errors: FolderErrors)
   return { ok: true, path: target }
 }
 
-/** `name.ext` → `name (2).ext`, `name (3).ext`… — first free name inside dir */
-export function uniqueNameIn(dir: string, name: string): string {
+/**
+ * `name.ext` → `name (2).ext`, `name (3).ext`… — first free name inside dir.
+ * A folder has no extension, so `isDir` appends the counter to the whole name:
+ * splitting `v1.0` would yield the mid-name `v1 (2).0`.
+ */
+export function uniqueNameIn(dir: string, name: string, isDir = false): string {
   if (!existsSync(join(dir, name))) return name
-  const ext = extname(name)
+  const ext = isDir ? '' : extname(name)
   const base = name.slice(0, name.length - ext.length)
   for (let i = 2; ; i++) {
     const candidate = `${base} (${i})${ext}`
@@ -275,7 +265,7 @@ export function movePathsInto(
         continue
       }
       if (policy === 'keepBoth') {
-        to = join(targetDir, uniqueNameIn(targetDir, name))
+        to = join(targetDir, uniqueNameIn(targetDir, name, isDir))
       } else {
         try {
           replaced = options.replaceExisting(to)
@@ -328,8 +318,13 @@ function isSameEntry(a: string, b: string): boolean {
 
 /** `oldPrefix/…/file` → `newPrefix/…/file` for a file that lived under a renamed/moved folder */
 export function rebasePath(path: string, oldDir: string, newDir: string): string {
-  const rel = resolve(path).slice(resolve(oldDir).length)
-  return join(newDir, rel)
+  const abs = resolve(path)
+  const base = resolve(oldDir)
+  // a plain slice also matches a sibling that merely shares the prefix
+  // (`/w/src2/f` under `/w/src`), so require the separator boundary and leave
+  // anything that did not live under the moved folder where it was
+  if (abs !== base && !abs.startsWith(base + sep)) return path
+  return join(newDir, abs.slice(base.length))
 }
 
 const WATCH_DEBOUNCE_MS = 250

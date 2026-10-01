@@ -307,6 +307,36 @@ export function maxRelationshipId(relationshipsXml: string): number {
   return max
 }
 
+/// Relationship ids are read quote-agnostically, for the same reason as
+/// pptx-engine's maxRelationshipIdNumber: a .rels part that spells its ids
+/// with single quotes still holds them, so no id may be handed out twice.
+const RELATIONSHIP_ID = /\bId\s*=\s*(["'])rId(\d+)\1/g
+
+function relationshipIds(relationshipsXml: string): Set<string> {
+  return new Set([...relationshipsXml.matchAll(RELATIONSHIP_ID)].map((match) => `rId${match[2]}`))
+}
+
+function firstFreeRelationshipId(used: ReadonlySet<string>): string {
+  let index = 1
+  while (used.has(`rId${index}`)) index += 1
+  return `rId${index}`
+}
+
+export function nextFreeRelationshipId(relationshipsXml: string): string {
+  return firstFreeRelationshipId(relationshipIds(relationshipsXml))
+}
+
+export function nextFreeRelationshipIds(relationshipsXml: string, count: number): string[] {
+  const used = relationshipIds(relationshipsXml)
+  const ids: string[] = []
+  for (let index = 0; index < count; index += 1) {
+    const id = firstFreeRelationshipId(used)
+    used.add(id)
+    ids.push(id)
+  }
+  return ids
+}
+
 /// Rebuilds workbook.xml for the plan: sheet elements renamed / added /
 /// removed and re-assembled in the final order, definedName localSheetId
 /// scopes renumbered (or dropped with their sheet), and the active tab
@@ -583,7 +613,7 @@ function readAttribute(elementXml: string, name: string): string | undefined {
   return new RegExp(`(?:^|\\s)${escapeRegExp(name)}="([^"]*)"`).exec(elementXml)?.[1]
 }
 
-function escapeRegExp(input: string): string {
+export function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 

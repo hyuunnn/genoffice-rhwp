@@ -2,6 +2,13 @@
 // section geometry and the patch outputs of a slicing pass.
 import type { SectionInfo, TextFlowDirection, TextOutline } from '@genoffice/docx-engine'
 
+/** one placeable line of a block; `lead` marks ink-less space a float pushed the
+ *  sole line past: the page bottom swallows it without a fit check */
+export interface LineBox {
+  offsetInBlock: number
+  height: number
+  lead?: boolean
+}
 export interface BlockBox {
   top: number
   height: number
@@ -29,6 +36,9 @@ export interface BlockBox {
   colBreakBefore?: boolean
   /** source DOM block (filled during canvas measurement, used to position page-gap decorations) */
   el?: HTMLElement
+  /** the element's own measured height (px at 100% zoom) before the inter-block
+   *  margins and lead space are folded into `height` */
+  domHeight?: number
   /** the block's docxIndex (DOM data-idx; new unsaved blocks lack one) */
   docxIndex?: number
   /** owning section index (filled by assignSections) */
@@ -92,13 +102,16 @@ export interface BlockBox {
    * Paragraph line-box list (from computeLineMetrics, for line-level page splitting).
    * When absent, degrades to F1 block-level greedy placement.
    */
-  lineBoxes?: Array<{ offsetInBlock: number; height: number }>
+  lineBoxes?: LineBox[]
   /** space before (px), from line-metrics output */
   spaceBeforePx?: number
   /** first block only: leading space-before folded into height (top moved to 0) */
   leadFoldPx?: number
   /** space after (px), from line-metrics output */
   spaceAfterPx?: number
+  /** auto-multiple extra leading of one line (px): a page's last line needs only
+   *  its single-spacing extent, this much may overflow the bottom margin */
+  lineLeadPx?: number
   /** total page-bottom footnote reservation folded into `height` by
    *  applyBlockMeta (never into spaceAfterPx: page-bottom exemptions must not
    *  hand it back) */
@@ -196,6 +209,8 @@ export interface PageColumn {
   end: number
   /** table continued into the column: header-row range repeated at column top (virtual coordinates) */
   repeatHeader?: { top: number; height: number }
+  /** spilled leading of the column's last line (px), see PageSlice.leadSpill */
+  leadSpill?: number
 }
 
 /** A column-flow region within a page (a continuous column-count change can stack multiple regions vertically on one page) */
@@ -251,6 +266,10 @@ export interface PageSlice {
   /** The owning section began mid-page on an earlier page (continuous break), so
    *  this is not its first page for w:titlePg header/footer selection. */
   continuedSection?: true
+  /** how far the page's last line box runs past the content bottom (px): the
+   *  auto-multiple leading of a paragraph kept by its single-spacing extent
+   *  (applyLeadSpills); the preview window grows by it so no glyph is clipped */
+  leadSpill?: number
 }
 
 /** Pagination geometry for one section */
@@ -352,6 +371,10 @@ export interface RowSplitPatch {
 }
 
 export interface SliceOutputs {
+  /** slicer runs the fixed-point loop took, and where its time went (diagnostics) */
+  iterations?: number
+  fillMs?: number
+  sliceRunMs?: number
   rowFills?: RowFillPatch[]
   rowSplits?: RowSplitPatch[]
   floatVShifts?: FloatVShiftPatch[]
@@ -361,6 +384,8 @@ export interface SliceOutputs {
   /** paragraphs the unequal-column balance wants to cut mid-paragraph but has no
    *  ColWrapTable for yet (fillColWraps measures them, then the slicer reruns) */
   colWrapRequests?: ColWrapRequest[]
+  /** the slicing before parity blanks were inserted (what a resumed pass builds on) */
+  preParity?: PageSlice[]
 }
 
 export interface ColWrapTable {
@@ -529,6 +554,14 @@ export interface BlockMeta {
   keepLines?: boolean
   /** paragraph opted out of section line numbering (w:suppressLineNumbers) */
   suppressLineNumbers?: boolean
+  /** the style chain's share of the flags above: a measured paragraph element takes its
+   *  direct flags from its own data-para and only these from the parse layer */
+  paraStyle?: {
+    keepNext?: boolean
+    keepLines?: boolean
+    widowControl?: boolean
+    suppressLineNumbers?: boolean
+  }
   /** pageBreakBefore (direct or style-level): force a page break before the block */
   breakBefore?: boolean
   /** false only when explicitly disabled (Word default on) */

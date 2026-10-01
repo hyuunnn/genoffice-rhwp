@@ -98,7 +98,9 @@ function appendDvRules(
     kept.push(
       remaining.length === areas.length
         ? entry
-        : entry.replace(/\bsqref="[^"]*"/, `sqref="${remaining.join(' ')}"`),
+        : // function replacer: a surviving area's text is document-controlled and a
+          // string replacement would expand $& / $1 / $` in it (xlsx-gateway.ts:2152)
+          entry.replace(/\bsqref="[^"]*"/, () => `sqref="${remaining.join(' ')}"`),
     )
   }
   const entries = [...kept, ...rules.map(serializeRule)]
@@ -245,7 +247,12 @@ function formulaText(type: string | undefined, raw: unknown): string | undefined
 /// 'YYYY-MM-DD[ HH:mm[:ss]]' (or slashes) → Excel serial (days since
 /// 1899-12-30). Plain numbers and references pass through untouched.
 /// Impossible calendar dates or clock times return undefined so the caller
-/// keeps the original text instead of writing a silently wrong serial.
+/// keeps the original text instead of writing a silently wrong serial; a
+/// pre-1900 year throws DvEditError, because it has no serial to write.
+/// Serials 1–59 sit one day before that linear rule, because the 1900 system
+/// counts a 29-Feb-1900 that never existed; 1900-03-01 (61) onward is already
+/// correct. The read side (formatSerial in @genoffice/file-parse) shifts back
+/// the same way in reverse, so both ends have to agree.
 function dateToSerial(text: string): number | undefined {
   const match =
     /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/.exec(
@@ -256,6 +263,15 @@ function dateToSerial(text: string): number | undefined {
   const yearNum = Number(year)
   const monthNum = Number(month)
   const dayNum = Number(day)
+  // Excel's 1900 date system has no serial before 1900-01-01, so such a date
+  // cannot be written at all. Date.UTC also maps a 0..99 year onto 19xx
+  // (0099 -> 1999), which would otherwise store a plausible, silently wrong
+  // serial; reject the year outright instead.
+  if (yearNum < 1900) {
+    throw new DvEditError(
+      `Data-validation date "${text.trim()}" is before 1900, which Excel cannot store.`,
+    )
+  }
   if (monthNum < 1 || monthNum > 12) return undefined
   if (dayNum < 1 || dayNum > daysInMonth(yearNum, monthNum)) return undefined
   let seconds = 0
@@ -269,7 +285,11 @@ function dateToSerial(text: string): number | undefined {
     seconds = hourNum * 3600 + minuteNum * 60 + secondNum
   }
   const days = (Date.UTC(yearNum, monthNum - 1, dayNum) - Date.UTC(1899, 11, 30)) / 86_400_000
-  return seconds === 0 ? days : days + seconds / 86_400
+  // The linear count already includes the phantom day, so 1900-01-01..1900-02-28
+  // each need one day back to land on the serial Excel stores (and that
+  // formatSerial reads back out).
+  const serial = days < 61 ? days - 1 : days
+  return seconds === 0 ? serial : serial + seconds / 86_400
 }
 
 /// Days in a 1-based month, with the Gregorian leap-year rule for February.

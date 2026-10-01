@@ -293,11 +293,13 @@ function findRunSpans(xml: string): Span[] {
   return spans
 }
 
-/** Points → ST_TextFontSize hundredths, clamped to the schema range (1pt..4000pt). */
+/** Points → ST_TextFontSize hundredths, clamped to the schema range (1pt..4000pt).
+ *  Non-finite inputs land on the lower bound (Math.max/min propagate NaN). */
 const MIN_FONT_SIZE_PT = 1
 const MAX_FONT_SIZE_PT = 4000
-function szAttr(pt: number): string {
-  return String(Math.round(Math.min(MAX_FONT_SIZE_PT, Math.max(MIN_FONT_SIZE_PT, pt)) * 100))
+export function szAttr(pt: number): string {
+  const safe = Number.isFinite(pt) ? pt : MIN_FONT_SIZE_PT
+  return String(Math.round(Math.min(MAX_FONT_SIZE_PT, Math.max(MIN_FONT_SIZE_PT, safe)) * 100))
 }
 
 /** Integer attribute value inside a schema range; NaN/Infinity land on the lower bound. */
@@ -306,8 +308,12 @@ export function clampInt(v: number, min: number, max: number): number {
 }
 /** ST_Coordinate / ST_PositiveCoordinate ceiling (EMU). */
 const COORD_MAX = 27273042316900
-const emuAttr = (v: number) => String(clampInt(v, -COORD_MAX, COORD_MAX))
-const posEmuAttr = (v: number) => String(clampInt(v, 0, COORD_MAX))
+// The numeric clamps are exported so the insert builders size their grids from
+// the same bounds their a:off/a:ext attributes are written with.
+export const clampEmu = (v: number): number => clampInt(v, -COORD_MAX, COORD_MAX)
+export const clampPosEmu = (v: number): number => clampInt(v, 0, COORD_MAX)
+const emuAttr = (v: number) => String(clampEmu(v))
+const posEmuAttr = (v: number) => String(clampPosEmu(v))
 const angleAttr = (v: number) => String(clampInt(v, -2147483648, 2147483647))
 const spcPtsXml = (pt: number) => `<a:spcPts val="${clampInt(pt * 100, 0, 158400)}"/>`
 const spcPctXml = (pct: number) => `<a:spcPct val="${clampInt(pct * 1000, 0, 13200000)}"/>`
@@ -797,6 +803,9 @@ export function generateParagraphXml(p: Paragraph): string {
     pPrAttrs.push(`indent="${clampInt(p.indent, -51206400, 51206400)}"`)
   if (p.align && want('align')) pPrAttrs.push(`algn="${alignMap[p.align]}"`)
   if (p.rtl != null) pPrAttrs.push(`rtl="${p.rtl ? 1 : 0}"`)
+  if (p.eaLnBrk === false) pPrAttrs.push('eaLnBrk="0"')
+  if (p.latinLnBrk) pPrAttrs.push('latinLnBrk="1"')
+  if (p.hangingPunct === false) pPrAttrs.push('hangingPunct="0"')
   if (p.level) pPrAttrs.push(`lvl="${p.level}"`)
 
   // CT_TextParagraphProperties child order: lnSpc → spcBef → spcAft → buClr → buSzPct → buFont → bu*

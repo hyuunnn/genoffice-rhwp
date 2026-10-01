@@ -19,12 +19,12 @@ import { XMLParser } from 'fast-xml-parser'
 import type { Transform, TextAlign } from './types'
 import { type EaScript, type Theme, eaScriptOfLang, resolveFontRef } from './theme'
 import { resolveColorNode } from './color'
-import { asXmlNode, xmlArray, type XmlNode } from './xml-utils'
+import { asXmlNode, decodeNumericCharRefs, xmlArray, type XmlNode } from './xml-utils'
 
 const phParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
-  isArray: (name) => ['p:sp'].includes(name),
+  isArray: (name) => ['p:sp', 'p:graphicFrame', 'p:pic'].includes(name),
 })
 
 /** Default run/paragraph style for one indent level (from lstStyle's lvlNpPr/defRPr). */
@@ -174,19 +174,36 @@ export function parsePlaceholderMap(
   } catch {
     return { entries }
   }
-  // Path: p:sldLayout / p:sldMaster → p:cSld → p:spTree → p:sp[]
+  // Path: p:sldLayout / p:sldMaster → p:cSld → p:spTree → p:sp[] + p:graphicFrame[] + p:pic[]
   const root = asXmlNode(doc['p:sldLayout'] ?? doc['p:sldMaster'])
   const spTreeRaw = asXmlNode(root['p:cSld'])['p:spTree']
   if (!spTreeRaw) return { entries }
   const spTree = asXmlNode(spTreeRaw)
-  for (const sp of xmlArray(spTree['p:sp'])) {
-    const phRaw = asXmlNode(asXmlNode(sp['p:nvSpPr'])['p:nvPr'])['p:ph']
+  const shapes: Array<{ node: XmlNode; nvKey: string; frame: boolean }> = [
+    ...xmlArray(spTree['p:sp']).map((node) => ({
+      node: asXmlNode(node),
+      nvKey: 'p:nvSpPr',
+      frame: false,
+    })),
+    ...xmlArray(spTree['p:graphicFrame']).map((node) => ({
+      node: asXmlNode(node),
+      nvKey: 'p:nvGraphicFramePr',
+      frame: true,
+    })),
+    ...xmlArray(spTree['p:pic']).map((node) => ({
+      node: asXmlNode(node),
+      nvKey: 'p:nvPicPr',
+      frame: false,
+    })),
+  ]
+  for (const { node: sp, nvKey, frame } of shapes) {
+    const phRaw = asXmlNode(asXmlNode(sp[nvKey])['p:nvPr'])['p:ph']
     if (!phRaw) continue
     const ph = asXmlNode(phRaw)
     const type = String(ph['@_type'] ?? 'body')
     const idx = ph['@_idx'] != null ? String(ph['@_idx']) : ''
     const spPr = asXmlNode(sp['p:spPr'])
-    const transform = parseXfrmNode(spPr['a:xfrm'])
+    const transform = frame ? parseXfrmNode(sp['p:xfrm']) : parseXfrmNode(spPr['a:xfrm'])
     const textStyle = parseLstStyleLevels(asXmlNode(sp['p:txBody'])['a:lstStyle'], theme, src)
     const bodyPrNode = asXmlNode(asXmlNode(sp['p:txBody'])['a:bodyPr'])
     const anchor = ANCHOR_MAP[String(bodyPrNode['@_anchor'] ?? '')]
@@ -236,13 +253,6 @@ const ALIGN_MAP: Record<string, TextAlign> = {
   ctr: 'center',
   r: 'right',
   just: 'justify',
-}
-
-/** fast-xml-parser does not decode numeric character references in attributes (&#x2022; etc.); done here. */
-function decodeAttrCharRefs(s: string): string {
-  return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
 }
 
 /** <a:spcPct val="150000"/> → 150 (%). */
@@ -295,7 +305,7 @@ function parseLvlPPr(
   const buChar = asXmlNode(pPr['a:buChar'])['@_char']
   if (pPr['a:buNone'] !== undefined) out.bullet = { type: 'none' }
   else if (buChar != null) {
-    out.bullet = { type: 'char', char: decodeAttrCharRefs(String(buChar)) }
+    out.bullet = { type: 'char', char: decodeNumericCharRefs(String(buChar)) }
   } else if (pPr['a:buAutoNum']) {
     out.bullet = { type: 'number' }
     const an = asXmlNode(pPr['a:buAutoNum'])

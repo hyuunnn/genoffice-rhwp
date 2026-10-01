@@ -8,7 +8,11 @@ import {
   type ToolDisplay,
 } from '@genoffice/agent-core'
 import type { RenderSlide } from '@genoffice/pptx-render'
-import { imageGenerationAvailable, mediaAnalysisAvailable } from '@genoffice/ai-provider/browser'
+import {
+  cloudToolsEnabled,
+  imageGenerationAvailable,
+  mediaAnalysisAvailable,
+} from '@genoffice/ai-provider/browser'
 import type { AiSettings, AttachmentAddResult, AttachmentMeta } from '../../shared/ipc'
 import { ATTACHMENT_IMAGE_EXTS } from '../../shared/ipc'
 import {
@@ -16,10 +20,10 @@ import {
   type DeckAccess,
   type ClarifyQuestion,
   type DeckProgressEvent,
-  type PageProgressItem,
 } from './slides-skill'
 import { extractJsonObject, parseOutlineJson } from './outline-json'
 import { EditQueueCard } from './EditQueueCard'
+import { deriveDeckProgressView, type DeckProgressSnapshot } from './deck-progress-view'
 import {
   buildPageInstruction,
   groupByPage,
@@ -211,35 +215,6 @@ function safeJsonInput(input: unknown): string | undefined {
   } catch {
     return undefined
   }
-}
-
-/** Generation progress snapshot in the chat stream (same card updated in real time) */
-interface DeckProgressSnapshot {
-  style?: { label: string; status: 'running' | 'done' | 'error'; summary: string }
-  plan?: {
-    label: string
-    done: number
-    total: number
-    status: 'running' | 'done' | 'error'
-    summary: string
-  }
-  images?: {
-    label: string
-    done: number
-    total: number
-    status: 'running' | 'done' | 'error'
-    summary: string
-  }
-  pages?: {
-    label: string
-    done: number
-    total: number
-    status: 'running' | 'done' | 'error'
-    summary: string
-    items: PageProgressItem[]
-  }
-  finalTotal?: number // Total page count from the done event
-  isDone?: boolean
 }
 
 interface ChatEntry {
@@ -1034,6 +1009,14 @@ export function AiPanel({
         })
       },
       isCloudPageGenEnabled: async () => {
+        // Cloud page generation runs on Genspark's own slide model and spends
+        // Genspark credits, so it is gated by the "Genspark cloud tools" toggle
+        // plus the main-process account status only — the chat provider does not
+        // gate it (search/media gate per capability, not per chat provider). A
+        // free-plan or credits-exhausted account is covered by the mid-run
+        // fallback to the local pipeline instead of disabling cloud up front.
+        const cur = settingsRef.current
+        if (!cloudToolsEnabled(cur)) return false
         try {
           return !!(await window.slidesApi.cloudGenStatus())?.enabled
         } catch {
@@ -1118,6 +1101,10 @@ export function AiPanel({
       // Cloud single-page generation (gsk slide_generate): the cloud service owns HTML writing +
       // pptx conversion; the deck-level style/outline stay local.
       generatePageCloud: async (args) => {
+        // Forward the panel's stop signal: the main process aborts the in-flight
+        // cloud request instead of letting it run (and bill) to completion
+        const cancelCloud = () => void window.slidesApi.cloudPageCancel().catch(() => {})
+        args.signal?.addEventListener('abort', cancelCloud, { once: true })
         try {
           const briefParts = [args.brief]
           if (args.layout) briefParts.push(`Layout intent: ${args.layout}`)
@@ -1142,6 +1129,8 @@ export function AiPanel({
           return res ?? { ok: false, error: tGlobal('aiErrUnknown') }
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        } finally {
+          args.signal?.removeEventListener('abort', cancelCloud)
         }
       },
       // ── In-tool planning: given topic+page count, the LLM produces a structured outline (batched recursion scheduled by the skill).
@@ -1284,7 +1273,13 @@ export function AiPanel({
             }
           }
           if (event.stage === 'done') {
-            return { ...prev, finalTotal: event.total, isDone: true }
+            return {
+              ...prev,
+              finalTotal: event.total,
+              isDone: true,
+              doneSummary: event.summary,
+              ...(event.outcome ? { doneOutcome: event.outcome } : {}),
+            }
           }
           return prev
         })
@@ -2774,49 +2769,8 @@ function DeckProgressCard({ progress }: { progress: DeckProgressSnapshot }) {
   // Collapsed by default: while generating only the one-line head shows (fewer concurrent loaders);
   // expanding is a view-only toggle
   const [open, setOpen] = useState(false)
-  const { style, plan, images, pages, isDone, finalTotal } = progress
-
-  type StepStatus = 'done' | 'error' | 'running'
-
-  // Fix the step display order (only steps that have appeared are shown).
-  // Labels come from skill-layer events (backend-defined steps pattern);
-  // in progress shows a live summary (e.g. "planned 5/10 page outlines…"), frozen to the label when done.
-  const steps: Array<{ key: string; label: string; stepStatus: StepStatus }> = []
-
-  const stepView = (
-    status: 'running' | 'done' | 'error',
-    label: string,
-    summary: string,
-  ): { label: string; stepStatus: StepStatus } => ({
-    // In progress/failed read summary; success freezes to the label
-    label: status === 'done' ? label : summary,
-    stepStatus: status === 'done' ? 'done' : status === 'error' ? 'error' : 'running',
-  })
-
-  if (style) {
-    steps.push({ key: 'style', ...stepView(style.status, style.label, style.summary) })
-  }
-  if (plan) {
-    steps.push({ key: 'plan', ...stepView(plan.status, plan.label, plan.summary) })
-  }
-  if (images) {
-    steps.push({ key: 'images', ...stepView(images.status, images.label, images.summary) })
-  }
-  if (pages) {
-    const allDone = isDone || pages.status === 'done'
-    const hasError = pages.items.some((p) => p.status === 'error')
-    steps.push({
-      key: 'pages',
-      label: allDone
-        ? `${pages.label}${pages.total > 0 ? t('aiPagesSuffix', { n: pages.total }) : ''}`
-        : pages.summary || pages.label,
-      stepStatus: allDone ? (hasError ? 'error' : 'done') : 'running',
-    })
-  }
-
-  // Show the summary when done; if any step errored, change the title to failed (avoiding perpetual "generating…" + spinner)
-  const doneSummary = isDone && finalTotal != null ? t('aiProgressDone', { n: finalTotal }) : null
-  const hasStepError = steps.some((s) => s.stepStatus === 'error')
+  const { head, steps } = deriveDeckProgressView(progress, t)
+  const pages = progress.pages
 
   if (steps.length === 0) return null
 
@@ -2828,12 +2782,12 @@ function DeckProgressCard({ progress }: { progress: DeckProgressSnapshot }) {
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        {!doneSummary && !hasStepError && <span className="deck-progress-spinner" aria-hidden />}
-        {doneSummary ? (
-          <span className="deck-progress-done">{doneSummary}</span>
+        {head.tone === 'running' && <span className="deck-progress-spinner" aria-hidden />}
+        {head.tone === 'done' ? (
+          <span className="deck-progress-done">{head.text}</span>
         ) : (
-          <span className={`deck-progress-title${hasStepError ? ' is-error' : ''}`}>
-            {hasStepError ? t('aiProgressFailed') : t('aiProgressTitle')}
+          <span className={`deck-progress-title${head.tone === 'error' ? ' is-error' : ''}`}>
+            {head.text}
           </span>
         )}
         <span className={`ai-tool-chip-caret${open ? ' open' : ''}`} aria-hidden>
@@ -2848,6 +2802,15 @@ function DeckProgressCard({ progress }: { progress: DeckProgressSnapshot }) {
                 <span className={`deck-progress-icon ${step.stepStatus}`}>
                   {step.stepStatus === 'running' ? (
                     <span className="deck-progress-spinner" />
+                  ) : step.stepStatus === 'stopped' ? (
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M2.5 6h7"
+                        stroke="currentColor"
+                        strokeWidth="0.75"
+                        strokeLinecap="round"
+                      />
+                    </svg>
                   ) : step.stepStatus === 'done' ? (
                     <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
                       <path
@@ -3038,7 +3001,7 @@ function ClarifyCard({
             className="ai-clarify-head-arrow"
             disabled={qIdx === 0}
             onClick={() => goTo(qIdx - 1)}
-            aria-label="‹"
+            aria-label={t('aiClarifyPrev')}
           >
             ‹
           </button>
@@ -3047,7 +3010,7 @@ function ClarifyCard({
             className="ai-clarify-head-arrow"
             disabled={qIdx >= furthest || !hasAnswer}
             onClick={() => goTo(qIdx + 1)}
-            aria-label="›"
+            aria-label={t('aiClarifyNext')}
           >
             ›
           </button>

@@ -34,6 +34,7 @@ export type UiLanguage =
   | 'he'
   | 'hi'
   | 'zh-TW'
+  | 'vi'
 
 /** UI theme preference */
 export type UiTheme = 'light' | 'dark' | 'system'
@@ -96,9 +97,79 @@ export interface RecentPage {
   totalAll: number
 }
 
+/** local file search over names, folders and extracted text */
+export interface FileSearchQuery {
+  q: string
+  /** sidebar filter key ('docx' | 'xlsx' | ...); omit for all */
+  ext?: string
+  offset?: number
+  limit?: number
+}
+
+export interface FileSearchSnippetPart {
+  text: string
+  hit: boolean
+}
+
+export interface FileSearchHit extends RecentEntry {
+  /** excerpt around the first content match; null when only the name or folder matched */
+  snippet: FileSearchSnippetPart[] | null
+  /** folded query fragments the file matched; highlight them in the name and folder */
+  needles: string[]
+}
+
+export type JevEndpoint = 'openrouter' | 'direct'
+
+/** home search options persisted in app-settings.json under `fileSearch` */
+export interface FileSearchSettings {
+  /** send the top local hits to TypeSafe's Jev model for reranking; default off */
+  rerank: boolean
+  jevEndpoint: JevEndpoint
+  jevKeys: Record<JevEndpoint, string>
+}
+
+export interface FileSearchRerank {
+  /** paths in Jev's order, most relevant first; paths not judged keep their local order after these */
+  order: string[]
+  /** calibrated 0–2 relevance per judged path */
+  scores: Record<string, number>
+}
+
+export interface FileSearchPage {
+  hits: FileSearchHit[]
+  total: number
+  index: {
+    indexed: number
+    pending: number
+    scanning: boolean
+  }
+}
+
+/**
+ * Default-app ownership of the Office document types. `others` lists the apps
+ * (display names) currently holding at least one type; `manualOnly` means the
+ * platform (Windows) only lets us open the system page.
+ */
+export interface DefaultAppStatus {
+  state: 'unsupported' | 'unknown' | 'default' | 'other'
+  others: string[]
+  manualOnly: boolean
+}
+
 export interface HomeApi {
   /** unified recents across document types, newest first (paged) */
   recents(query?: RecentQuery): Promise<RecentPage>
+  /** search indexed files by name, folder and content */
+  searchFiles(query: FileSearchQuery): Promise<FileSearchPage>
+  /** Jev order for the hits currently shown (≤ 20 paths); null when reranking is off or unavailable */
+  rerankSearch(query: { q: string; paths: string[] }): Promise<FileSearchRerank | null>
+  getFileSearchSettings(): Promise<FileSearchSettings>
+  setFileSearchSettings(patch: Partial<FileSearchSettings>): Promise<FileSearchSettings>
+  /** one two-document Jev judgement against a (possibly unsaved) key */
+  testFileSearchRerank(input: {
+    endpoint: JevEndpoint
+    apiKey: string
+  }): Promise<{ ok: boolean; error?: string }>
   /** starred files (independent of the recent list), newest first (paged) */
   starred(query?: RecentQuery): Promise<RecentPage>
   /** stat a specific set of paths (project view); unstat-able files come back flagged `missing` */
@@ -135,8 +206,16 @@ export interface HomeApi {
   deleteFiles(paths: string[]): Promise<void>
   /** open the OS trash, where deleted files can be restored */
   openTrash(): Promise<void>
-  /** the folder tree root (= default save folder); `usable` false when it cannot be created/written */
-  folderRoot(): Promise<FolderRoot>
+  /** the tree roots: the default save folder first, then the folders the user added */
+  folderRoots(): Promise<FolderRoot[]>
+  /** directory picker; the chosen folder joins the tree in place (nothing is copied or moved) */
+  addFolderRoot(): Promise<FolderRoot | null>
+  /** OS paths dropped on the Folders panel: folders join the tree, documents open */
+  dropFolderRoots(paths: string[]): Promise<FolderRoot[]>
+  /** take an added folder off the list; the disk is untouched */
+  removeFolderRoot(path: string): Promise<void>
+  /** absolute path of a File from an OS drag (Electron webUtils) */
+  pathForFile(file: File): string
   /** one level of the tree: sub-folders + supported files directly inside `dir` */
   listFolder(dir: string): Promise<FolderListing>
   /** create `parent/name`; resolves to the new path */
@@ -208,6 +287,10 @@ export interface HomeApi {
   getDefaultSaveDir(): Promise<string>
   /** directory picker to change the default save folder; resolves to the new folder, or null when canceled or the pick was unusable */
   pickDefaultSaveDir(): Promise<string | null>
+  /** who opens .docx/.xlsx/.pptx today (Settings → General "default app" row) */
+  getDefaultAppStatus(): Promise<DefaultAppStatus>
+  /** claim the Office types (mac/linux) or open the system Default Apps page (win); resolves to the refreshed status */
+  setDefaultApp(): Promise<DefaultAppStatus>
   /** theme switched anywhere (broadcast from the main process) */
   onThemeChanged(handler: (theme: UiTheme) => void): () => void
   /** open the GenTeam community page in the default browser */
@@ -237,6 +320,8 @@ export interface HomeApi {
   getAiProviders(): AiCatalogEntry[]
   /** live Codex model catalog discovered through the current or overridden app-server */
   getCodexModels(cliPath?: string): Promise<CodexModelCatalog>
+  /** live model list advertised by a user-hosted OpenAI-compatible endpoint; empty when it cannot answer */
+  getCustomModels(baseUrl: string, apiKey?: string): Promise<CodexModelCatalog>
   /** one-shot round trip against the given (possibly unsaved) settings — the settings-UI connection test */
   testAiSettings(settings: AiSettings): Promise<AiChatResponse>
   /** image generation / media analysis provider catalog */
@@ -324,7 +409,7 @@ export interface NewFileOpts {
   dir?: string
 }
 
-// ── Folder tree (home "Folders" panel over the default save folder) ──────
+// ── Folder tree (home "Folders" panel: the default save folder plus any folder the user added) ──
 
 export interface FolderRoot {
   path: string
@@ -332,6 +417,10 @@ export interface FolderRoot {
   name: string
   /** false when the folder does not exist and cannot be created, or is read-only */
   usable: boolean
+  /** the folder exists and can be listed (a read-only or unplugged root is still shown) */
+  readable: boolean
+  /** an added folder: can be taken off the list; the default save folder cannot */
+  removable: boolean
 }
 
 export interface FolderEntry {
@@ -378,6 +467,11 @@ export interface MoveResult {
 
 export const HOME_CHANNELS = {
   recents: 'home:recents',
+  searchFiles: 'home:search-files',
+  rerankSearch: 'home:rerank-search',
+  getFileSearchSettings: 'home:get-file-search-settings',
+  setFileSearchSettings: 'home:set-file-search-settings',
+  testFileSearchRerank: 'home:test-file-search-rerank',
   starred: 'home:starred',
   statPaths: 'home:stat-paths',
   toggleStar: 'home:toggle-star',
@@ -396,7 +490,10 @@ export const HOME_CHANNELS = {
   duplicateFile: 'home:duplicate-file',
   deleteFiles: 'home:delete-files',
   openTrash: 'home:open-trash',
-  folderRoot: 'home:folder-root',
+  folderRoots: 'home:folder-roots',
+  addFolderRoot: 'home:folder-root-add',
+  dropFolderRoots: 'home:folder-root-drop',
+  removeFolderRoot: 'home:folder-root-remove',
   listFolder: 'home:folder-list',
   createFolder: 'home:folder-create',
   renameFolder: 'home:folder-rename',
@@ -429,6 +526,8 @@ export const HOME_CHANNELS = {
   getAiPanelPrefs: 'home:get-ai-panel-prefs',
   setAiPanelPrefs: 'home:set-ai-panel-prefs',
   getDefaultSaveDir: 'home:get-default-save-dir',
+  getDefaultAppStatus: 'home:get-default-app-status',
+  setDefaultApp: 'home:set-default-app',
   pickDefaultSaveDir: 'home:pick-default-save-dir',
   openGenTeam: 'home:open-genteam',
   openCreditUsage: 'home:open-credit-usage',

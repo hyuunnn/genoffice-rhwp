@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import {
   AI_MEDIA_PROVIDERS,
@@ -13,6 +13,7 @@ import type {
   AccountLoginEvent,
   AccountStatus,
   CloudProjectsSnapshot,
+  DefaultAppStatus,
   FolderListing,
   FolderRoot,
   MoveResult,
@@ -21,6 +22,9 @@ import type {
   RecentPage,
   RenameResult,
   UiLanguage,
+  FileSearchPage,
+  FileSearchRerank,
+  FileSearchSettings,
 } from '../shared/home-api'
 import { HOME_CHANNELS } from '../shared/home-api'
 import { INTEGRATIONS_CHANNELS } from '../shared/integrations-api'
@@ -53,6 +57,7 @@ const UI_LANGUAGES: readonly UiLanguage[] = [
   'he',
   'hi',
   'zh-TW',
+  'vi',
 ]
 
 function isUiLanguage(value: unknown): value is UiLanguage {
@@ -68,9 +73,59 @@ function asRecentPage(result: unknown): RecentPage {
   return EMPTY_PAGE
 }
 
+const EMPTY_SEARCH: FileSearchPage = {
+  hits: [],
+  total: 0,
+  index: { indexed: 0, pending: 0, scanning: false },
+}
+
+function asSearchPage(result: unknown): FileSearchPage {
+  if (result && typeof result === 'object' && Array.isArray((result as FileSearchPage).hits)) {
+    return result as FileSearchPage
+  }
+  return EMPTY_SEARCH
+}
+
+function normalizeDefaultAppStatus(result: unknown): DefaultAppStatus {
+  const r = (result ?? {}) as Partial<DefaultAppStatus>
+  const state = r.state
+  return {
+    state: state === 'default' || state === 'other' || state === 'unknown' ? state : 'unsupported',
+    others: Array.isArray(r.others) ? r.others.filter((x) => typeof x === 'string') : [],
+    manualOnly: r.manualOnly === true,
+  }
+}
+
 const homeApi: HomeApi = {
   async recents(query) {
     return asRecentPage(await ipcRenderer.invoke(HOME_CHANNELS.recents, query))
+  },
+  async searchFiles(query) {
+    return asSearchPage(await ipcRenderer.invoke(HOME_CHANNELS.searchFiles, query))
+  },
+  async rerankSearch(query) {
+    const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.rerankSearch, query)
+    return result && typeof result === 'object' && Array.isArray((result as FileSearchRerank).order)
+      ? (result as FileSearchRerank)
+      : null
+  },
+  async getFileSearchSettings() {
+    return (await ipcRenderer.invoke(HOME_CHANNELS.getFileSearchSettings)) as FileSearchSettings
+  },
+  async setFileSearchSettings(patch) {
+    return (await ipcRenderer.invoke(
+      HOME_CHANNELS.setFileSearchSettings,
+      patch,
+    )) as FileSearchSettings
+  },
+  async testFileSearchRerank(input) {
+    const raw = ((await ipcRenderer.invoke(HOME_CHANNELS.testFileSearchRerank, input)) ?? {}) as {
+      ok?: unknown
+      error?: unknown
+    }
+    return raw.ok === true
+      ? { ok: true }
+      : { ok: false, error: typeof raw.error === 'string' ? raw.error : 'Connection failed' }
   },
   async starred(query) {
     return asRecentPage(await ipcRenderer.invoke(HOME_CHANNELS.starred, query))
@@ -130,8 +185,20 @@ const homeApi: HomeApi = {
   async deleteFiles(paths) {
     await ipcRenderer.invoke(HOME_CHANNELS.deleteFiles, paths)
   },
-  async folderRoot() {
-    return (await ipcRenderer.invoke(HOME_CHANNELS.folderRoot)) as FolderRoot
+  async folderRoots() {
+    return (await ipcRenderer.invoke(HOME_CHANNELS.folderRoots)) as FolderRoot[]
+  },
+  async addFolderRoot() {
+    return (await ipcRenderer.invoke(HOME_CHANNELS.addFolderRoot)) as FolderRoot | null
+  },
+  async dropFolderRoots(paths) {
+    return (await ipcRenderer.invoke(HOME_CHANNELS.dropFolderRoots, paths)) as FolderRoot[]
+  },
+  async removeFolderRoot(path) {
+    await ipcRenderer.invoke(HOME_CHANNELS.removeFolderRoot, path)
+  },
+  pathForFile(file) {
+    return webUtils.getPathForFile(file)
   },
   async listFolder(dir) {
     return (await ipcRenderer.invoke(HOME_CHANNELS.listFolder, dir)) as FolderListing
@@ -319,6 +386,12 @@ const homeApi: HomeApi = {
     const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.getDefaultSaveDir)
     return typeof result === 'string' ? result : ''
   },
+  async getDefaultAppStatus() {
+    return normalizeDefaultAppStatus(await ipcRenderer.invoke(HOME_CHANNELS.getDefaultAppStatus))
+  },
+  async setDefaultApp() {
+    return normalizeDefaultAppStatus(await ipcRenderer.invoke(HOME_CHANNELS.setDefaultApp))
+  },
   async pickDefaultSaveDir() {
     const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.pickDefaultSaveDir)
     return typeof result === 'string' && result ? result : null
@@ -395,6 +468,9 @@ const homeApi: HomeApi = {
   },
   async getCodexModels(cliPath) {
     return (await ipcRenderer.invoke('ai:codex-models', cliPath)) as CodexModelCatalog
+  },
+  async getCustomModels(baseUrl, apiKey) {
+    return (await ipcRenderer.invoke('ai:custom-models', { baseUrl, apiKey })) as CodexModelCatalog
   },
   async testAiSettings(settings) {
     const result: unknown = await ipcRenderer.invoke('ai:chat', {
@@ -492,6 +568,34 @@ const tabsApi: TabsApi = {
   },
   async showNewMenu(x, y) {
     await ipcRenderer.invoke(TABS_CHANNELS.showNewMenu, x, y)
+  },
+  async showTabMenu(id, x, y) {
+    await ipcRenderer.invoke(TABS_CHANNELS.showTabMenu, id, x, y)
+  },
+  async detach(id) {
+    await ipcRenderer.invoke(TABS_CHANNELS.detach, id)
+  },
+  async tearOff(id, screenX, screenY) {
+    const result: unknown = await ipcRenderer.invoke(TABS_CHANNELS.tearOff, id, screenX, screenY)
+    return result === true
+  },
+  dragTornWindow(screenX, screenY) {
+    ipcRenderer.send(TABS_CHANNELS.dragTornWindow, screenX, screenY)
+  },
+  async dockTornWindow(index) {
+    await ipcRenderer.invoke(TABS_CHANNELS.dockTornWindow, index)
+  },
+  async endTornDrag() {
+    await ipcRenderer.invoke(TABS_CHANNELS.endTornDrag)
+  },
+  onDockPreview(handler) {
+    const listener = (_event: IpcRendererEvent, preview: { x: number } | null) =>
+      handler(preview && typeof preview.x === 'number' ? { x: preview.x } : null)
+    ipcRenderer.on(TABS_CHANNELS.dockPreview, listener)
+    return () => ipcRenderer.removeListener(TABS_CHANNELS.dockPreview, listener)
+  },
+  reportDockIndex(index) {
+    ipcRenderer.send(TABS_CHANNELS.dockIndex, index)
   },
   async showAppMenu(x, y) {
     await ipcRenderer.invoke(TABS_CHANNELS.showAppMenu, x, y)

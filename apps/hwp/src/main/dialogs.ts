@@ -241,6 +241,18 @@ const tDlg = createI18n({
     btnDontSave: '不儲存',
     btnCancel: '取消',
   },
+  vi: {
+    dlgSaveTitle: 'Lưu tài liệu Hangul',
+    filterHwp: 'Tài liệu Hangul',
+    filterHwpx: 'Tài liệu Hangul HWPX',
+    filterHml: 'Tài liệu Hangul HML',
+    untitledFile: 'Hangul chưa có tiêu đề',
+    closeUnsavedMsg: 'Tài liệu này có thay đổi chưa được lưu.',
+    closeUnsavedDetail: 'Bạn có muốn lưu trước khi đóng không?',
+    btnSave: 'Lưu',
+    btnDontSave: 'Không lưu',
+    btnCancel: 'Hủy',
+  },
 })
 
 export type DlgKey =

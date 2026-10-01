@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
-  collectTreeFiles,
   createFolder,
   describeRoot,
   isHiddenEntry,
@@ -21,6 +20,7 @@ import {
   isSelfOrDescendant,
   listFolder,
   movePathsInto,
+  pathsUnder,
   rebasePath,
   renameFolder,
   uniqueNameIn,
@@ -140,6 +140,40 @@ describe('createFolder / renameFolder', () => {
   })
 })
 
+describe('pathsUnder', () => {
+  it('keeps only the candidates below the folder, at any depth, once each', () => {
+    const dir = join(root, 'src')
+    const deep = join(dir, 'a', 'b', 'deep.md')
+    const direct = join(dir, 'report.docx')
+    expect(
+      pathsUnder(dir, [
+        deep,
+        direct,
+        direct,
+        dir,
+        join(root, 'src-other', 'x.docx'),
+        join(root, 'report.docx'),
+        join(dir, '..', 'outside.md'),
+      ]),
+    ).toEqual([deep, direct])
+  })
+
+  it('never touches the disk', () => {
+    const dir = join(root, 'never-created')
+    expect(pathsUnder(dir, [join(dir, 'x.docx')])).toEqual([join(dir, 'x.docx')])
+    expect(existsSync(dir)).toBe(false)
+  })
+})
+
+describe('rebasePath', () => {
+  it('leaves a path that did not live under the moved folder alone', () => {
+    const outside = touch('notes.md')
+    const sibling = touch('src2/deep.md')
+    expect(rebasePath(outside, join(root, 'src'), join(root, 'dest'))).toBe(outside)
+    expect(rebasePath(sibling, join(root, 'src'), join(root, 'dest'))).toBe(sibling)
+  })
+})
+
 describe('movePathsInto', () => {
   it('moves files and folders, reporting old → new paths', () => {
     const file = touch('report.docx')
@@ -155,12 +189,7 @@ describe('movePathsInto', () => {
       { from: file, to: join(root, 'dest', 'report.docx') },
       { from: join(root, 'src'), to: join(root, 'dest', 'src') },
     ])
-    expect(collectTreeFiles(join(root, 'dest'))).toEqual(
-      expect.arrayContaining([
-        join(root, 'dest', 'report.docx'),
-        join(root, 'dest', 'src', 'deep.md'),
-      ]),
-    )
+    expect(existsSync(join(root, 'dest', 'src', 'deep.md'))).toBe(true)
     expect(rebasePath(nested, join(root, 'src'), join(root, 'dest', 'src'))).toBe(
       join(root, 'dest', 'src', 'deep.md'),
     )
@@ -272,9 +301,43 @@ describe('helpers', () => {
     expect(uniqueNameIn(root, 'b.md')).toBe('b.md')
   })
 
+  it('uniqueNameIn appends the counter to a dotted folder name whole', () => {
+    // a folder has no extension: 'v1.0' must not become 'v1 (2).0'
+    mkdirSync(join(root, 'v1.0'))
+    expect(uniqueNameIn(root, 'v1.0', true)).toBe('v1.0 (2)')
+    mkdirSync(join(root, 'v1.0 (2)'))
+    expect(uniqueNameIn(root, 'v1.0', true)).toBe('v1.0 (3)')
+    // a file keeps the extension split
+    touch('report.docx')
+    expect(uniqueNameIn(root, 'report.docx')).toBe('report (2).docx')
+  })
+
+  it("'keepBoth' appends the counter to a dotted folder name whole", () => {
+    mkdirSync(join(root, 'src', 'v1.0'), { recursive: true })
+    mkdirSync(join(root, 'dest', 'v1.0'), { recursive: true })
+    const moved = movePathsInto(
+      [join(root, 'src', 'v1.0')],
+      join(root, 'dest'),
+      'keepBoth',
+      errors,
+      {
+        replaceExisting: () => ({ commit: () => {}, rollback: () => {} }),
+      },
+    )
+    expect(moved.moved).toEqual([
+      { from: join(root, 'src', 'v1.0'), to: join(root, 'dest', 'v1.0 (2)') },
+    ])
+  })
+
   it('describeRoot creates a missing root and reports it usable', () => {
     const fresh = join(root, 'GenOffice')
-    expect(describeRoot(fresh)).toEqual({ path: fresh, name: 'GenOffice', usable: true })
+    expect(describeRoot(fresh)).toEqual({
+      path: fresh,
+      name: 'GenOffice',
+      usable: true,
+      readable: true,
+      removable: false,
+    })
   })
 
   it('describeRoot reports a path blocked by a file as unusable', () => {

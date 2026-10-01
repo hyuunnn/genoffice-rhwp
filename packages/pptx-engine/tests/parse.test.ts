@@ -748,6 +748,19 @@ describe('table (p:graphicFrame a:tbl) parsing', () => {
     expect(el.rows[1][1].merged).toBe(true)
   })
 
+  it('no tableStyleId and no cell borders → PowerPoint "No Style, Table Grid" dk1 lines', () => {
+    const bare = tableXml.replace(/<a:ln[LRTB][^>]*>.*?<\/a:ln[LRTB]>/gs, '')
+    expect(bare).not.toContain('<a:lnB')
+    const slide = parseSlide({
+      path: 'ppt/slides/slide1.xml',
+      slideXml: slideXml.replace(tableXml, bare),
+      ctx: {},
+    })
+    const c00 = (slide.elements[0] as any).rows[0][0]
+    expect(c00.borders.b).toEqual({ fill: { type: 'solid', color: '#000000' }, width: 12700 })
+    expect(c00.borders.l).toEqual({ fill: { type: 'solid', color: '#000000' }, width: 12700 })
+  })
+
   it('table element keeps byte fidelity (originalXml passthrough on save)', () => {
     const slide = parseSlide({ path: 'ppt/slides/slide1.xml', slideXml, ctx: {} })
     expect(reassembleSlideXml(slide)).toBe(slideXml)
@@ -815,6 +828,24 @@ describe('group (p:grpSp) parsing', () => {
     expect(c2.transform.offset.x).toBe(2000)
   })
 
+  it('keeps deeply nested groups as byte-preserving passthroughs', () => {
+    let group = '<p:sp><p:nvSpPr/><p:spPr/></p:sp>'
+    for (let i = 0; i < 2_000; i++) {
+      group = `<p:grpSp><p:nvGrpSpPr/><p:grpSpPr/>${group}</p:grpSp>`
+    }
+    const slideXml =
+      '<?xml version="1.0"?><p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree>' +
+      '<p:nvGrpSpPr/><p:grpSpPr/>' +
+      group +
+      '</p:spTree></p:cSld></p:sld>'
+
+    const slide = parseSlide({ path: 'ppt/slides/slide1.xml', slideXml, ctx: {} })
+
+    expect(slide.elements).toHaveLength(1)
+    expect(slide.elements[0]?.type).toBe('passthrough')
+    expect(reassembleSlideXml(slide)).toBe(slideXml)
+  })
+
   it('group emits original bytes on reassemble (fidelity: no child roundtrip)', () => {
     const slide = parseSlide({ path: 'ppt/slides/slide1.xml', slideXml: groupSlideXml, ctx: {} })
     expect(reassembleSlideXml(slide)).toBe(groupSlideXml)
@@ -865,6 +896,18 @@ describe('bullet (buChar/buAutoNum/buNone) and paragraph indent parsing', () => 
     expect(p.bullet).toEqual({ type: 'char', char: '•' })
     expect(p.marL).toBe(127000)
     expect(p.indent).toBe(-127000)
+  })
+
+  it('keeps invalid numeric bullet references without aborting slide parsing', () => {
+    const slide = parseSlide({
+      path: 'ppt/slides/slide1.xml',
+      slideXml: sldWith('<a:pPr><a:buChar char="&#x110000;"/></a:pPr>'),
+      ctx: {},
+    })
+    expect((slide.elements[0] as any).text.paragraphs[0].bullet).toEqual({
+      type: 'char',
+      char: '&#x110000;',
+    })
   })
 
   it('buAutoNum / buNone', () => {
@@ -945,6 +988,11 @@ describe('slide master bodyStyle bullet/indent inheritance', () => {
     expect(p.bullet).toEqual({ type: 'char', char: '•' })
     expect(p.marL).toBe(342900)
     expect(p.indent).toBe(-342900)
+  })
+
+  it('keeps invalid numeric bullet references in master list styles', () => {
+    const master = parseMasterTextStyles(masterXml.replace('&#x2022;', '&#x110000;'))
+    expect(master.body?.levels[0]?.bullet).toEqual({ type: 'char', char: '&#x110000;' })
   })
 
   it('buFontTx on an inheriting paragraph keeps the glyph but drops the chain font', () => {

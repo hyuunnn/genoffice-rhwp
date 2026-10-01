@@ -47,6 +47,16 @@ import {
   slidesIsDirty,
 } from '../../../slides/src/main/slides-main'
 import type { DocumentTabKind, OpenDocumentTab, TabKind, TabSummary } from '../shared/tabs-api'
+import { TAB_STRIP_HEIGHT } from '../shared/tab-drag-geometry'
+
+/** a tab lifted out of the strip with its live view: what "Open in New Window",
+ *  tear-off and dock hand back and forth between the shell and a detached window */
+export interface DetachedTab {
+  view: WebContentsView
+  kind: TabKind
+  title: string
+  filePath?: string
+}
 
 interface TabRecord {
   id: string
@@ -59,8 +69,6 @@ interface TabRecord {
   present?: boolean
 }
 
-/** must match the tab strip's rendered height (apps/shell/src/renderer/src/TabBar.tsx) */
-const TAB_STRIP_HEIGHT = 40
 const HOME_ID = 'home'
 
 /**
@@ -83,6 +91,9 @@ export class TabManager {
   private readonly bleedWcIds = new Set<number>()
   /** tabs mid unsaved-changes prompt, so a second close click doesn't stack dialogs */
   private readonly closingIds = new Set<string>()
+  /** views whose HTML-fullscreen listeners are installed: a view that leaves
+   *  for a detached window and docks back must not get a second pair */
+  private readonly fullScreenTracked = new WeakSet<WebContentsView>()
   /** Sheets renderer mounted ahead of the next open: parsing its bundle and
    *  booting Univer is the bulk of a workbook's open time, and the shell hands
    *  the path over after mount anyway. */
@@ -105,20 +116,19 @@ export class TabManager {
       this.layout()
       setImmediate(() => this.layout())
     })
-    shellWindow.webContents.once('did-finish-load', () => this.scheduleSpareSheetsView(1500))
   }
 
   private scheduleSpareSheetsView(delayMs: number): void {
-    if (process.env.GENOFFICE_NO_SPARE_VIEW || this.spareSheetsTimer) return
+    if (process.env.GENOFFICE_NO_SPARE_VIEW || this.spareSheetsTimer || this.spareSheetsView) return
+    if (this.tabs.find((t) => t.id === this.activeId)?.kind !== 'sheets') return
     this.spareSheetsTimer = setTimeout(() => {
       this.spareSheetsTimer = null
       if (this.spareSheetsView || this.shellWindow.isDestroyed()) return
+      const active = this.tabs.find((t) => t.id === this.activeId)
+      if (active?.kind !== 'sheets') return
       const view = createSheetsView({ includeAiHandlers: false })
       // registering the session made the spare the menu-action target
-      const active = this.tabs.find((t) => t.id === this.activeId)
-      setActiveSheetsWebContents(
-        active?.kind === 'sheets' && active.view ? active.view.webContents : null,
-      )
+      setActiveSheetsWebContents(active.view?.webContents ?? null)
       this.shellWindow.contentView.addChildView(view)
       view.setVisible(false)
       view.setBounds(this.contentBounds())
@@ -135,6 +145,16 @@ export class TabManager {
     const view = this.spareSheetsView
     this.spareSheetsView = null
     return view && !view.webContents.isDestroyed() ? view : null
+  }
+
+  private discardSpareSheetsView(): void {
+    if (this.spareSheetsTimer) clearTimeout(this.spareSheetsTimer)
+    this.spareSheetsTimer = null
+    const spare = this.spareSheetsView
+    this.spareSheetsView = null
+    if (!spare) return
+    this.shellWindow.contentView.removeChildView(spare)
+    spare.webContents.close()
   }
 
   private untitled(kind: TabKind, fallback: string): string {
@@ -165,13 +185,20 @@ export class TabManager {
    * grow its view over the tab strip so nothing of the shell chrome shows;
    * restore the normal bounds on leave.
    */
-  private trackHtmlFullScreen(id: string, view: WebContentsView): void {
+  private trackHtmlFullScreen(view: WebContentsView): void {
+    if (this.fullScreenTracked.has(view)) return
+    this.fullScreenTracked.add(view)
+    // resolved at event time: the same view gets a fresh id every time it docks
+    const currentId = () => this.tabs.find((t) => t.view === view)?.id
     view.webContents.on('enter-html-full-screen', () => {
+      const id = currentId()
+      if (id === undefined) return
       this.htmlFullScreenId = id
       this.layout()
     })
     view.webContents.on('leave-html-full-screen', () => {
-      if (this.htmlFullScreenId === id) this.htmlFullScreenId = null
+      const id = currentId()
+      if (id !== undefined && this.htmlFullScreenId === id) this.htmlFullScreenId = null
       this.layout()
     })
   }
@@ -261,7 +288,7 @@ export class TabManager {
     if (options?.aiContent) queueDocsAiContent(view.webContents.id, options.aiContent)
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({
       id,
       kind: 'docs',
@@ -276,7 +303,8 @@ export class TabManager {
   openSheetsTab(openPath?: string, options?: { newBlank?: boolean }): string {
     if (options?.newBlank) setSheetsNewBlank()
     const spare = this.takeSpareSheetsView()
-    const view = spare ?? createSheetsView({ includeAiHandlers: false })
+    const view =
+      spare ?? createSheetsView({ includeAiHandlers: false, openingWorkbook: Boolean(openPath) })
     // bind the path to this tab's webContents: a multi-select Open creates
     // several sheets tabs in one loop, so a single global path would be
     // overwritten before the earlier tabs consume it
@@ -289,8 +317,7 @@ export class TabManager {
       this.shellWindow.contentView.addChildView(view)
       view.setVisible(false)
     }
-    this.trackHtmlFullScreen(id, view)
-    this.scheduleSpareSheetsView(3000)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({
       id,
       kind: 'sheets',
@@ -307,7 +334,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({
       id,
       kind: 'slides',
@@ -324,7 +351,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({ id, kind: 'pdf', view, title: basename(openPath), filePath: openPath })
     this.activateTab(id)
     return id
@@ -344,7 +371,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({
       id,
       kind: 'markdown',
@@ -361,7 +388,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({
       id,
       kind: 'html',
@@ -378,7 +405,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({
       id,
       kind: 'hwp',
@@ -396,7 +423,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({
       id,
       kind: 'html',
@@ -414,9 +441,28 @@ export class TabManager {
     for (const t of this.tabs) t.view?.setVisible(t.id === id)
     if (target.view) target.view.setBounds(this.contentBounds())
     this.activeId = id
+    if (target.kind === 'sheets') this.scheduleSpareSheetsView(3000)
+    else this.discardSpareSheetsView()
     this.refreshActiveTargets()
+    this.focusActiveView()
     this.onChanged()
     if (target.kind === 'hwp' && target.view) target.view.webContents.focus?.()
+  }
+
+  /** Hand keyboard focus to the active tab's view. The click that opened or
+   *  switched a tab lands on the chrome webContents (tab strip, Home list),
+   *  and a WebContentsView made visible does not take focus on its own — so
+   *  without this, typing after every open/switch keeps going to a hidden
+   *  view. Home has no view of its own; the shell window's webContents is
+   *  the focus target there. Skipped while the window is unfocused
+   *  (background opens must not steal OS focus); the window's `focus`
+   *  handler re-runs it. */
+  focusActiveView(): void {
+    if (this.shellWindow.isDestroyed() || !this.shellWindow.isFocused()) return
+    const target = this.tabs.find((t) => t.id === this.activeId)
+    if (!target) return
+    if (target.view) target.view.webContents.focus()
+    else this.shellWindow.webContents.focus()
   }
 
   /** Re-point the process-global active-editor targets and the app menu at this
@@ -442,6 +488,15 @@ export class TabManager {
     const [moved] = this.tabs.splice(fromIndex, 1)
     this.tabs.splice(clamped, 0, moved)
     this.onChanged()
+  }
+
+  /** kind, title and file of the document tab rendered by `webContentsId` (Home has no view) */
+  describeWebContents(
+    webContentsId: number,
+  ): { kind: TabKind; title: string; filePath?: string } | null {
+    const tab = this.tabs.find((t) => t.view?.webContents.id === webContentsId)
+    if (!tab) return null
+    return { kind: tab.kind, title: tab.title, ...(tab.filePath ? { filePath: tab.filePath } : {}) }
   }
 
   tabIdForWebContents(webContentsId: number): string | undefined {
@@ -637,6 +692,64 @@ export class TabManager {
     }
   }
 
+  /** Remove a tab from the strip WITHOUT destroying its WebContentsView and
+   *  hand it to the caller ("Open in New Window" — the live document, unsaved
+   *  edits included, moves into a detached editor window). Null while a close
+   *  prompt is pending on the tab. */
+  detachTab(id: string): DetachedTab | null {
+    if (id === HOME_ID) return null
+    const idx = this.tabs.findIndex((t) => t.id === id)
+    const tab = idx >= 0 ? this.tabs[idx] : undefined
+    if (!tab?.view || tab.present || this.closingIds.has(id)) return null
+    this.tabs.splice(idx, 1)
+    if (this.htmlFullScreenId === id) this.htmlFullScreenId = null
+    const view = tab.view
+    view.setVisible(false)
+    this.shellWindow.contentView.removeChildView(view)
+    if (this.activeId === id) {
+      const fallback = this.tabs[idx - 1] ?? this.tabs[0]
+      this.activateTab(fallback.id)
+    } else {
+      this.onChanged()
+    }
+    return { view, kind: tab.kind, title: tab.title, filePath: tab.filePath }
+  }
+
+  /** Whether a tab can leave the strip for its own window (tear-off / Open in
+   *  New Window): every document tab except a chrome-free Present tab. */
+  canDetachTab(id: string): boolean {
+    const tab = this.tabs.find((t) => t.id === id)
+    return !!tab?.view && !tab.present && !this.closingIds.has(id)
+  }
+
+  /**
+   * The inverse of detachTab: a live view coming back from a detached window
+   * (dock by dragging the window onto the strip, or a tear-off that returned
+   * mid-gesture) becomes a tab again at `index` — Home stays pinned at 0, an
+   * out-of-range or omitted index appends — and is activated. The document,
+   * unsaved edits included, is untouched: only the view's parent changes.
+   */
+  attachTab(record: DetachedTab, index?: number): string {
+    const id = `t${this.nextId++}`
+    const { view } = record
+    this.shellWindow.contentView.addChildView(view)
+    view.setVisible(false)
+    this.trackHtmlFullScreen(view)
+    const slot =
+      index === undefined || !Number.isFinite(index)
+        ? this.tabs.length
+        : Math.min(Math.max(Math.trunc(index), 1), this.tabs.length)
+    this.tabs.splice(slot, 0, {
+      id,
+      kind: record.kind,
+      view,
+      title: record.title,
+      filePath: record.filePath,
+    })
+    this.activateTab(id)
+    return id
+  }
+
   /** the editor tab showing this file, whichever module owns it (path compared after resolving links) */
   findTabByPath(
     path?: string,
@@ -729,7 +842,7 @@ export class TabManager {
   }
 }
 
-function canonicalPath(path: string | undefined): string | undefined {
+export function canonicalPath(path: string | undefined): string | undefined {
   if (path === undefined) return undefined
   try {
     return realpathSync.native(path)

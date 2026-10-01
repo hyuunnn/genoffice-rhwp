@@ -5,6 +5,7 @@ import {
   registerContentTypeOverride,
   relativeTarget,
   relsPathFor,
+  resolveRelTarget,
   type MutablePackage,
 } from './xlsx-drawing-add'
 import { ensureRelationshipNamespace } from './xlsx-namespace'
@@ -155,7 +156,7 @@ async function assertNoTableOverlap(pkg: MutablePackage, addition: TableAddition
     if (!tag.includes(`Type="${TABLE_REL_TYPE}"`)) continue
     const target = /\bTarget="([^"]+)"/.exec(tag)?.[1]
     if (!target) continue
-    const tablePath = resolveTarget(addition.worksheetPath, target)
+    const tablePath = resolveRelTarget(addition.worksheetPath, target)
     if (!(await pkg.has(tablePath))) continue
     const ref = /<table\b[^>]*\bref="([^"]+)"/.exec(await pkg.readText(tablePath))?.[1]
     if (ref && areasOverlap(addition.area, parseRef(ref))) {
@@ -182,16 +183,6 @@ function assertNoSheetConflicts(addition: TableAddition, worksheetXml: string): 
   }
 }
 
-/// Resolves a relationship target relative to its source part.
-function resolveTarget(fromPart: string, target: string): string {
-  const base = fromPart.split('/').slice(0, -1)
-  for (const segment of target.split('/')) {
-    if (segment === '..') base.pop()
-    else if (segment !== '.' && segment !== '') base.push(segment)
-  }
-  return base.join('/')
-}
-
 function buildTableXml(id: number, addition: TableAddition): string {
   const ref = areaToRef(addition.area)
   const name = escapeAttribute(addition.name)
@@ -214,16 +205,32 @@ function buildTableXml(id: number, addition: TableAddition): string {
   )
 }
 
+/// Number of <tablePart> children the sheet already declares. `<tablePart\b`
+/// does not match `<tableParts`, so the container opener is not counted.
+function countTableParts(worksheetXml: string): number {
+  return (worksheetXml.match(/<tablePart\b/g) ?? []).length
+}
+
 /// Appends (or extends) the worksheet's <tableParts> element. Schema order
 /// puts tableParts after every print/drawing element, before extLst.
 function appendTablePart(worksheetXml: string, relId: string): string {
   const xml = ensureRelationshipNamespace(worksheetXml)
   const part = `<tablePart r:id="${relId}"/>`
-  const existing = /<tableParts\b[^>]*count="(\d+)"[^>]*>/.exec(xml)
+  const existing = /<tableParts\b[^>]*?(\/?)>/.exec(xml)
   if (existing) {
-    const opener = existing[0]
-    const count = Number(existing[1] ?? 0) + 1
-    const reopened = opener.replace(/count="\d+"/, `count="${count}"`)
+    const [opener, selfClosing] = existing
+    // count is optional in CT_TableParts: when the opener omits it, count the
+    // children instead — matching the attribute alone left the element behind
+    // and a second <tableParts> was written before </worksheet>.
+    const declared = /count="(\d+)"/.exec(opener)?.[1]
+    const count = (declared === undefined ? countTableParts(xml) : Number(declared)) + 1
+    if (selfClosing === '/') {
+      return xml.replace(opener, `<tableParts count="${count}">${part}</tableParts>`)
+    }
+    const reopened =
+      declared === undefined
+        ? opener.replace(/>$/, ` count="${count}">`)
+        : opener.replace(/count="\d+"/, `count="${count}"`)
     return xml.replace(opener, reopened).replace('</tableParts>', `${part}</tableParts>`)
   }
   const element = `<tableParts count="1">${part}</tableParts>`

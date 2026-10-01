@@ -4,7 +4,52 @@ import { join } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
 
+/**
+ * The slice of the tiptap editor that this spec drives directly. The instance is
+ * attached to the `.doc-editor` element by tiptap (`view.dom.editor = editor`),
+ * so setting the caret through it keeps ProseMirror's state and the DOM in sync.
+ */
+type MarkdownEditorHandle = {
+  commands: {
+    focus: (position: 'start' | 'end' | 'all' | number | boolean | null) => boolean
+  }
+  state: { doc: { content: { size: number } }; selection: { from: number } }
+}
+
 test.describe('markdown editor', () => {
+  test('newly opened long Markdown starts at the title', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'genoffice-md-scroll-'))
+    const mdPath = join(dir, 'scroll-repro.md')
+    const lines = Array.from(
+      { length: 30 },
+      (_, index) =>
+        `${String(index + 1).padStart(2, '0')}. This line increases the document height for the scroll position check.`,
+    )
+    await writeFile(
+      mdPath,
+      `# Weekly note\n\n## Context\n\nFirst section.\n\n## Actions\n\n- [ ] Prepare a short summary.\n\n## Reference notes\n\n${lines.join('\n')}\n`,
+    )
+
+    const launched = await launchShell({
+      onboardingSeen: true,
+      videoDir: 'markdown-initial-scroll',
+      openFile: mdPath,
+    })
+    try {
+      const page = await waitForPageWithUrl(launched.app, '://markdown/')
+      await expect(page.locator('.doc-editor h1')).toHaveText('Weekly note')
+      await page.locator('.doc-editor').focus()
+      await expect
+        .poll(() =>
+          page.locator('.editor-scroll').evaluate((el) => el.scrollHeight > el.clientHeight),
+        )
+        .toBe(true)
+      await expect.poll(() => page.locator('.editor-scroll').evaluate((el) => el.scrollTop)).toBe(0)
+    } finally {
+      await closeAndSaveVideo(launched, 'markdown-initial-scroll')
+    }
+  })
+
   test('AI Markdown quick card opens a markdown editor tab', async () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'new-markdown-tab' })
     const { app, page } = launched
@@ -90,8 +135,34 @@ test.describe('markdown editor', () => {
       await expect(editor.locator('strong')).toHaveText('bold')
 
       // type at the end of the document, save with ⌘/Ctrl+S
-      await editor.click()
-      await editorPage.keyboard.press('ControlOrMeta+End')
+      // Place the caret through the editor instance rather than a raw DOM Range:
+      // ProseMirror is not obliged to adopt a selection written from the outside,
+      // and when it does not the caret stays where the load-time
+      // setTextSelection(1) left it, so the keystrokes land inside the heading
+      // ("# Appended line.Hello") instead of in a new trailing block.
+      await editor.focus()
+      await editor.evaluate((element) => {
+        const instance = (element as HTMLElement & { editor?: MarkdownEditorHandle }).editor
+        if (!instance) throw new Error('No editor instance attached to .doc-editor')
+        if (!instance.commands.focus('end')) {
+          throw new Error('Could not move the caret to the end of the document')
+        }
+        // `focus('end')` resolves to Selection.atEnd(doc); allow one position of
+        // slack so the guard trips on a caret stuck near the top of the document
+        // (position 1, where the load-time selection sits) rather than on an
+        // off-by-one in the resolved end position.
+        const end = instance.state.doc.content.size
+        if (Math.abs(instance.state.selection.from - end) > 1) {
+          throw new Error(
+            `Caret at ${instance.state.selection.from}, expected the end of the document (${end})`,
+          )
+        }
+      })
+      // `focus('end')` focuses the view on the next frame; wait for it so the
+      // keystrokes below are not delivered before the editor owns the caret.
+      await editorPage.waitForFunction(
+        () => document.activeElement?.classList.contains('doc-editor') === true,
+      )
       await editorPage.keyboard.press('Enter')
       await editorPage.keyboard.type('Appended line.')
       await editorPage.keyboard.press('ControlOrMeta+s')

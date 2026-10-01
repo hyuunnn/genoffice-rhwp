@@ -8,7 +8,6 @@ import { app, ipcMain, nativeImage, net, shell } from 'electron'
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -25,6 +24,7 @@ import {
   activeProvider,
   maxOutputTokensOf,
   resolveAiSettings,
+  sanitizeAiSettings,
   setAiUserAgent,
   setRescueFetch,
   streamForProvider,
@@ -35,7 +35,12 @@ import {
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { shutdownCodexAppServers } from '@genoffice/ai-provider/codex-app-server'
-import { fetchRemoteImage } from '@genoffice/electron-utils'
+import {
+  MAX_REMOTE_IMAGE_BYTES,
+  fetchRemoteImage,
+  readBodyCapped,
+  writeJsonAtomic,
+} from '@genoffice/electron-utils'
 import {
   webSearchTool,
   imageSearchTool,
@@ -65,11 +70,6 @@ function readJson<T>(path: string, fallback: T): T {
     /* Corrupted state file: fall back to defaults */
   }
   return fallback
-}
-
-function writeJson(path: string, value: unknown): void {
-  mkdirSync(join(path, '..'), { recursive: true })
-  writeFileSync(path, JSON.stringify(value, null, 2))
 }
 
 const activeAiStreams = new Map<string, AbortController>()
@@ -131,7 +131,15 @@ export function registerAiIpc(): void {
   })
 
   ipcMain.handle('ai:set-settings', (_event, settings: AiSettings) => {
-    writeJson(AI_SETTINGS_PATH(), settings)
+    // SECURITY.md: payloads are schema-checked in the main process. The settings
+    // file feeds cliPath into spawn() and baseUrl receives the gsk bearer token,
+    // so the renderer's copy is sanitized before it touches disk.
+    const sanitized = sanitizeAiSettings(settings)
+    if (!sanitized) {
+      console.warn('[ai] rejected invalid ai:set-settings payload')
+      return
+    }
+    writeJsonAtomic(AI_SETTINGS_PATH(), sanitized)
   })
 
   ipcMain.handle('ai:log-run-failure', (_event, entry: AiRunFailure) => {
@@ -139,7 +147,19 @@ export function registerAiIpc(): void {
   })
 
   ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
-    const { requestId, settings, system, messages } = request
+    // per-request settings get the same schema check as the persisted ones: a
+    // compromised renderer could otherwise hand cliPath/baseUrl straight to
+    // the provider layer without ever touching the settings file
+    const settings = sanitizeAiSettings(request.settings)
+    if (!settings) {
+      event.sender.send('ai:stream-chunk', {
+        requestId: request.requestId,
+        type: 'error',
+        error: 'invalid AI settings payload',
+      } satisfies AiStreamChunk)
+      return
+    }
+    const { requestId, system, messages } = request
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? maxOutputTokensOf(settings)
     const provider = settings.provider
@@ -351,7 +371,7 @@ export function registerSlidesOnlyAiIpc(): void {
           // fetchRemoteImage adds CDN-friendly headers and transient-error retries.
           const resp = await fetchRemoteImage(String(op.url))
           if (!resp || !resp.ok) return null
-          buf = Buffer.from(await resp.arrayBuffer())
+          buf = Buffer.from(await readBodyCapped(resp, MAX_REMOTE_IMAGE_BYTES))
           const ct = resp.headers.get('content-type') ?? ''
           ext = ct.includes('png') ? 'png' : ct.includes('gif') ? 'gif' : 'jpg'
         }
@@ -424,7 +444,7 @@ export function registerSlidesOnlyAiIpc(): void {
         } else {
           const resp = await fetchRemoteImage(String(op.url))
           if (!resp || !resp.ok) return null
-          buf = Buffer.from(await resp.arrayBuffer())
+          buf = Buffer.from(await readBodyCapped(resp, MAX_REMOTE_IMAGE_BYTES))
           const ct = resp.headers.get('content-type') ?? ''
           ext = ct.includes('png') ? 'png' : ct.includes('gif') ? 'gif' : 'jpg'
         }
@@ -485,18 +505,17 @@ export function registerSlidesOnlyAiIpc(): void {
 
   ipcMain.handle(
     'ai:save-style-template',
-    (
+    async (
       _event,
       name: string,
       data: { topic: string; styleSkill: string; createdAt: string },
-    ): { ok: boolean; error?: string } => {
+    ): Promise<{ ok: boolean; error?: string }> => {
       try {
         const dir = STYLE_TEMPLATES_DIR()
-        mkdirSync(dir, { recursive: true })
         // Filename: replace illegal characters in the name with _ then truncate to 64 chars
         const safeName = name.replace(/[/\\:*?"<>|]/g, '_').slice(0, 64)
         if (!safeName) return { ok: false, error: tm('errTplNameInvalid') }
-        writeJson(join(dir, `${safeName}.json`), { ...data, name: safeName })
+        writeJsonAtomic(join(dir, `${safeName}.json`), { ...data, name: safeName })
         return { ok: true }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }

@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto'
 import { extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { generateImageTool } from '@genoffice/ai-search'
-import { fetchRemoteImage } from '@genoffice/electron-utils/remote-image'
+import {
+  MAX_REMOTE_IMAGE_BYTES,
+  fetchRemoteImage,
+  readBodyCapped,
+} from '@genoffice/electron-utils/remote-image'
 import { flagBool, flagString } from '../args'
 import { aiSettingsPath, prepareCloud } from '../cloud'
 import { resolveInput, resolveOutput, writeOutput } from '../fs'
@@ -93,7 +97,11 @@ export const imageCommand: CommandDef = {
       model: flagString(args, 'model'),
       ...(refs.length ? { referenceImageUrls: refs } : {}),
     })
-    if (!r.url) throw new CliError(EXIT.app, r.error ?? 'image generation failed')
+    if (!r.url)
+      throw new CliError(EXIT.app, r.error ?? 'image generation failed', undefined, {
+        suggestion:
+          'retry once later; if it persists, check the Genspark login in the GenOffice app, configure a BYOK image provider under Settings (AI Media), or continue without generated images',
+      })
     const image = await loadImage(r.url)
     const ext = EXTS_BY_MIME[image.mime]?.[0] ?? 'png'
     // the provider picks the encoding; a .png name holding JPEG bytes would mislead every reader,
@@ -141,7 +149,7 @@ async function loadImage(url: string): Promise<{ bytes: Uint8Array; mime: string
   const response = await fetchRemoteImage(url)
   if (!response?.ok) throw new CliError(EXIT.app, `could not download the generated image: ${url}`)
   const mime = response.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png'
-  return { bytes: new Uint8Array(await response.arrayBuffer()), mime }
+  return { bytes: await readBodyCapped(response, MAX_REMOTE_IMAGE_BYTES), mime }
 }
 
 /** yyyymmdd-hhmmssmmm plus a random tail, so two runs in the same instant do not collide */

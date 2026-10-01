@@ -19,6 +19,7 @@ import { ms } from './ai/ms'
 import { he } from './ai/he'
 import { hi } from './ai/hi'
 import { zhTW } from './ai/zh-TW'
+import { vi } from './ai/vi'
 
 export const strings = defineStrings({
   zh,
@@ -41,4 +42,5 @@ export const strings = defineStrings({
   he,
   hi,
   'zh-TW': zhTW,
+  vi,
 })

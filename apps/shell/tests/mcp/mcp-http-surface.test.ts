@@ -276,6 +276,7 @@ describe('MCP surface over Streamable HTTP (/mcp)', () => {
         'xlsm',
         'xls',
         'csv',
+        'tsv',
       ])
 
       // ── 3. read_docx error paths ──────────────────────────────────────────

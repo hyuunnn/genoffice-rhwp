@@ -214,7 +214,11 @@ export function customEnumItems(format: string): string[] | null {
   return items.length >= 2 && items.every(Boolean) ? items : null
 }
 
-export function formatNumber(value: number, numFmt: string, customFormat?: string): string {
+export function formatNumber(rawValue: number, numFmt: string, customFormat?: string): string {
+  // Numbering values arrive from the file (w:start/w:val): a hostile 1e9
+  // would loop toRoman ~1M times and build a 38MB toLetters repeat string,
+  // and Infinity never terminates. Bound once at the choke point.
+  const value = Number.isFinite(rawValue) ? Math.min(Math.floor(rawValue), 999_999) : 0
   if (numFmt === 'custom') {
     const items = customFormat ? customEnumItems(customFormat) : null
     // enumeration exhausted: cycle (best-effort; Word's continuation rules are undocumented)
@@ -323,6 +327,8 @@ export interface ListMarkerInfo {
   picBulletSrc?: string
   /** literal bullet text declared in an ordinary text font (Word's "o" in Courier New) */
   font?: string
+  /** the item's own counter value (numbered levels only) */
+  value?: number
 }
 
 /** text-font substitutes draw solid round bullets smaller than the Word symbol glyph
@@ -413,8 +419,13 @@ export function computeListMarkerInfos(
     // numFmt "none": an explicit empty marker (Word shows nothing) so renderer
     // counter fallbacks don't kick in on the null
     if (!marker && level.numFmt !== 'none') return null
-    return { text: marker }
+    return { text: marker, value: c[lvl] }
   })
+}
+
+/** Per item: the counter value its own level shows (1 for bullets and unresolved items) */
+export function computeListValues(items: ListItemRef[], defs: Map<string, NumberingDef>): number[] {
+  return computeListMarkerInfos(items, defs).map((m) => m?.value ?? 1)
 }
 
 export function computeListMarkers(
@@ -444,6 +455,8 @@ export function markerTabAdvance(
   if (markerStart < textIndent && end <= textIndent) return null
   const custom = customStops.filter((s) => s > end).sort((a, b) => a - b)[0]
   if (custom !== undefined) return custom - markerStart
+  // no default grid (w:defaultTabStop 0): the text follows the marker directly
+  if (!(defaultTab > 0)) return markerWidth
   const floor = Math.max(end, ...customStops)
   const stop = (Math.floor(floor / defaultTab) + 1) * defaultTab
   return stop - markerStart

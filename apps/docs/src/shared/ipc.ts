@@ -1,8 +1,8 @@
 export interface OpenFileResult {
   path: string
   name: string
-  /** raw docx bytes */
-  data: ArrayBuffer
+  /** one-shot URL serving the docx bytes (fetch it exactly once) */
+  dataUrl: string
   /** sha256 of the original file; original archived under this hash */
   hash: string
   /** the on-disk file is password protected (opened via decrypt; saves re-encrypt) */
@@ -130,6 +130,7 @@ export type MenuCommand =
   | 'zoom-in'
   | 'zoom-out'
   | 'zoom-100'
+  | 'zoom-set'
   | 'zoom-page-width'
   | 'zoom-whole-page'
   | 'toggle-ai'
@@ -151,11 +152,39 @@ export type MenuCommand =
   | 'align-justify'
   | 'page-setup'
   | 'find'
+  | 'replace'
+  | 'goto'
   | 'print'
   | 'export-pdf'
   | 'export-html'
   | 'export-images'
   | 'word-count'
+  | 'autocorrect-options'
+  | 'preferences'
+  | 'table-insert-cells'
+  | 'table-insert-rows-above'
+  | 'table-insert-rows-below'
+  | 'table-insert-cols-left'
+  | 'table-insert-cols-right'
+  | 'table-delete-table'
+  | 'table-delete-columns'
+  | 'table-delete-rows'
+  | 'table-delete-cells'
+  | 'table-select-table'
+  | 'table-select-column'
+  | 'table-select-row'
+  | 'table-select-cell'
+  | 'table-merge-cells'
+  | 'table-split-cells'
+  | 'table-split-table'
+  | 'table-autofit-contents'
+  | 'table-autofit-window'
+  | 'table-autofit-fixed'
+  | 'table-distribute-rows'
+  | 'table-distribute-columns'
+  | 'table-repeat-header'
+  | 'table-gridlines'
+  | 'table-properties'
   | 'ai-proofread'
   | 'shortcuts'
 
@@ -244,12 +273,27 @@ export interface McpSaveResult {
   path?: string
   error?: string
   passwordIntentPending?: boolean
-  data?: ArrayBuffer
+  dataUrl?: string
+}
+
+/** Chromium's misspelling data for a claimed body right-click (`seq` = the claim it answers) */
+export interface ContextMenuRequest {
+  seq: number
+  misspelledWord: string
+  suggestions: string[]
+}
+
+export interface SpellLanguages {
+  active: string[]
+  /** empty on macOS: the OS checker picks the language itself */
+  available: string[]
 }
 
 export interface DesktopApi {
   /** current UI language (persisted by the shell in app-settings.json) */
   getLanguage(): Promise<'zh' | 'en' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'th' | 'id' | 'ru' | 'ar'>
+  /** OS regional-settings locale (BCP 47); Word derives the new-document paper size from it */
+  getSystemLocale(): Promise<string>
   /** language switched from the shell home page */
   onLanguageChanged(
     handler: (
@@ -276,6 +320,7 @@ export interface DesktopApi {
   respondToZotero(response: ZoteroRendererResponse): void
   openDocx(): Promise<OpenDocxResult>
   openDocxPath(path: string): Promise<OpenDocxResult>
+  confirmDocumentReplace(): Promise<boolean>
   /** decrypt-and-open a password-protected docx (path from a needsPassword result) */
   openDocxDecrypt(path: string, password: string): Promise<DecryptOpenResult>
   /** w:altChunk HTML rendered through html2docx in a hidden window; null when conversion fails */
@@ -316,9 +361,9 @@ export interface DesktopApi {
     reason?: 'external-modified'
     /** a newer password choice arrived after this save's snapshot */
     passwordIntentPending?: boolean
-    /** the saved document in full when an encrypted save absorbed lazily served
-     *  pictures: the renderer reparses from it and leaves lazy mode */
-    data?: ArrayBuffer
+    /** one-shot URL of the saved document in full when an encrypted save absorbed
+     *  lazily served pictures: the renderer reparses from it and leaves lazy mode */
+    dataUrl?: string
   }>
   /** crash-recovery copy of a dirty document, stored under userData */
   writeRecoveryCopy(path: string, data: ArrayBuffer): Promise<{ ok: boolean }>
@@ -333,6 +378,20 @@ export interface DesktopApi {
    *  spellcheck failures are intermittent and platform-bound, so the
    *  toggle/kick lifecycle keeps a trace support can ask users for */
   spellDiag(line: string): void
+  /** opt this renderer into claiming right-clicks: claimed clicks get no native menu */
+  armContextMenu(): void
+  /** synchronous, from the DOM contextmenu handler: the React menu answers this
+   *  right-click, so Blink's request for it must not pop the native menu */
+  claimContextMenu(seq: number): void
+  /** Chromium's misspelling data for a claimed click */
+  onContextMenuRequest(handler: (request: ContextMenuRequest) => void): () => void
+  spellAddWord(word: string): Promise<boolean>
+  /** Word's Ignore All: skipped while this document is open, forgotten when it closes */
+  spellIgnoreWord(word: string): Promise<boolean>
+  /** Blink-side replacement of the misspelled word under the last right-click */
+  spellReplace(word: string): Promise<void>
+  spellLanguages(): Promise<SpellLanguages>
+  spellSetLanguages(langs: string[]): Promise<SpellLanguages>
   /** sourcePath: the document's current path — Save As uses its desired next-save
    *  password and commits that state to the chosen path only after success */
   saveDocxAs(
@@ -344,7 +403,7 @@ export interface DesktopApi {
     path?: string
     error?: string
     passwordIntentPending?: boolean
-    data?: ArrayBuffer
+    dataUrl?: string
   }>
   /** first save of a new document: silently writes into the default folder, no dialog */
   saveDocxNew(
@@ -355,7 +414,7 @@ export interface DesktopApi {
     path?: string
     error?: string
     passwordIntentPending?: boolean
-    data?: ArrayBuffer
+    dataUrl?: string
   }>
   /** MCP-driven output: write the current document to an explicit absolute path
    *  with no dialog; refuses to replace an existing file unless overwrite is true */
@@ -451,6 +510,11 @@ export interface DesktopApi {
     /** failure reason when method === 'error' */
     error?: string
   }>
+  /** media understanding (image/audio/video) via the configured media provider; returns analysis text */
+  analyzeMedia(op: {
+    mediaUrls: string[]
+    requirements: string
+  }): Promise<{ text?: string; error?: string }>
   fetchImage(url: string): Promise<{ base64: string; mime: string } | null>
   /** AI image generation via the Genspark cloud channel (requires login + cloud tools) */
   aiGenerateImage(op: {

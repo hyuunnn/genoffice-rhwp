@@ -6,6 +6,7 @@ import {
   customEnumItems,
   formatNumber,
   markerTabAdvance,
+  mergeLevelXml,
   parseDocx,
   saveDocx,
   type SaveBlock,
@@ -98,6 +99,34 @@ describe('mixed multilevel list kind', () => {
       }),
     )
     expect(doc.blocks[0].list).toMatchObject({ kind: 'ordered', ilvl: 4 })
+  })
+})
+
+describe('mergeLevelXml keeps foreign-namespace children', () => {
+  it('keeps w14 extension children of rPr and an mc:AlternateContent sibling', () => {
+    // the child scan matched w: names only, so a w14:textOutline vanished from
+    // the marker's rPr and the mc:AlternateContent was replaced by its own child
+    const outline =
+      '<w14:textOutline w14:w="9525"><w14:solidFill><w14:srgbClr w14:val="FF0000"/>' +
+      '</w14:solidFill></w14:textOutline>'
+    const alt =
+      '<mc:AlternateContent><mc:Choice Requires="wps"><w:drawing/></mc:Choice></mc:AlternateContent>'
+    const existing =
+      '<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/>' +
+      `<w:rPr><w:rFonts w:ascii="Symbol"/>${outline}</w:rPr>${alt}</w:lvl>`
+
+    const merged = mergeLevelXml(existing, { numFmt: 'bullet', lvlText: '–', indentLeft: 720 }, 0)
+    expect(merged).toContain(`<w:rPr><w:rFonts w:ascii="Symbol"/>${outline}</w:rPr>`)
+    expect(merged).toContain(alt)
+    expect(merged).toContain('<w:lvlText w:val="–"/>')
+
+    // an rPr holding nothing but a w14 child survives instead of being deleted
+    const extOnly = mergeLevelXml(
+      `<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/><w:rPr>${outline}</w:rPr></w:lvl>`,
+      { numFmt: 'bullet', lvlText: '–', indentLeft: 720 },
+      0,
+    )
+    expect(extOnly).toContain(`<w:rPr>${outline}</w:rPr>`)
   })
 })
 
@@ -396,6 +425,11 @@ describe('markerTabAdvance (default tab after the marker)', () => {
 
   it('honors a custom default tab interval', () => {
     expect(markerTabAdvance(0, 400, 360, 708)).toBe(708)
+  })
+
+  it('a zero default tab grid puts the text right after the marker, custom stops still win', () => {
+    expect(markerTabAdvance(0, 400, 360, 0)).toBe(400)
+    expect(markerTabAdvance(0, 400, 360, 0, [1080])).toBe(1080)
   })
 })
 
@@ -784,5 +818,28 @@ describe('markerTabAdvance with custom tab stops', () => {
     // every custom stop is behind the marker: next default past both
     expect(markerTabAdvance(0, 1500, 0, 720, [720])).toBe(2160)
     expect(markerTabAdvance(0, 1500, 0, 720, [])).toBe(2160)
+  })
+})
+
+describe('hostile numbering values', () => {
+  it('bounds huge and non-finite values instead of hanging', () => {
+    const start = Date.now()
+    for (const fmt of [
+      'upperRoman',
+      'lowerRoman',
+      'upperLetter',
+      'lowerLetter',
+      'upperGreek',
+      'decimal',
+    ]) {
+      for (const v of [1e9, Infinity, -Infinity, NaN]) {
+        const out = formatNumber(v, fmt)
+        expect(typeof out).toBe('string')
+        expect(out.length).toBeLessThan(100_000)
+      }
+    }
+    expect(Date.now() - start).toBeLessThan(10000)
+    expect(formatNumber(4, 'upperRoman')).toBe('IV')
+    expect(formatNumber(27, 'upperLetter')).toBe('AA')
   })
 })

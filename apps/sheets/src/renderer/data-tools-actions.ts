@@ -76,9 +76,12 @@ export function handleImportCsv(ctx: DataToolsContext): void {
       ctx.setMessage(t('appCsvTooLarge'))
       return
     }
-    void file.arrayBuffer().then((buffer) => {
-      importCsvText(ctx, decodeCsvBuffer(new Uint8Array(buffer), CSV_CHARSET_BY_LANG[getLang()]))
-    })
+    void file
+      .arrayBuffer()
+      .then((buffer) => {
+        importCsvText(ctx, decodeCsvBuffer(new Uint8Array(buffer), CSV_CHARSET_BY_LANG[getLang()]))
+      })
+      .catch(() => ctx.setMessage(t('appCsvTooLarge')))
   }
   input.click()
 }
@@ -203,8 +206,12 @@ export function handleApplyFormula(ctx: DataToolsContext, formula: string): stri
   if (!workbook || !worksheet || !range) return t('appSelectCellFirst')
   const trimmed = formula.trim()
   if (!trimmed.startsWith('=')) return t('appFormulaStartsEquals')
-  const opens = (trimmed.match(/\(/g) ?? []).length
-  const closes = (trimmed.match(/\)/g) ?? []).length
+  // Count the parens outside literals only: a paren inside "..." or a quoted
+  // sheet name is text, so counting it rejected valid formulas such as
+  // =LEN("a)b"). Same blanking pass cf-formula-fold.ts uses before scanning.
+  const bare = trimmed.replace(/"(?:[^"]|"")*"/g, '""').replace(/'(?:[^']|'')*'!?/g, '')
+  const opens = (bare.match(/\(/g) ?? []).length
+  const closes = (bare.match(/\)/g) ?? []).length
   if (opens !== closes) return t('appUnbalancedParens')
   try {
     worksheet.getRange(range.getRow(), range.getColumn(), 1, 1).setValue({ f: trimmed })

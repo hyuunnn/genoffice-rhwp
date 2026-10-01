@@ -36,6 +36,8 @@ export interface StyleParaProps {
   pageBreakBefore?: boolean
   /** 1-9 (w:outlineLvl val + 1) */
   outlineLevel?: number | null
+  /** list level linked to the style (w:numPr); null removes it */
+  numPr?: { numId: string; ilvl: number } | null
 }
 
 /**
@@ -136,10 +138,13 @@ interface Child {
 type Attrs = Map<string, string>
 
 function parseTag(xml: string): { name: string; attrs: Attrs; selfClosing: boolean } {
-  const m = /^<([A-Za-z0-9:._-]+)((?:\s+[^\s=>]+="[^"]*")*)\s*(\/?)>/.exec(xml)
+  const m = /^<([A-Za-z0-9:._-]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/.exec(xml)
   if (!m) throw new Error(`style-upsert: not an element: ${xml.slice(0, 40)}`)
   const attrs: Attrs = new Map()
-  for (const a of m[2]!.matchAll(/([^\s=>]+)="([^"]*)"/g)) attrs.set(a[1]!, a[2]!)
+  for (const a of m[2]!.matchAll(/([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    const value = a[2] !== undefined ? a[2]! : a[3]!.replace(/"/g, '&quot;')
+    attrs.set(a[1]!, value)
+  }
   return { name: m[1]!, attrs, selfClosing: m[3] === '/' }
 }
 
@@ -206,7 +211,16 @@ class Children {
   }
 }
 
-const num = (n: number) => String(Math.round(n))
+const num = (n: number) => {
+  if (!Number.isFinite(n)) throw new Error(`Invalid numeric value: ${String(n)}`)
+  return String(Math.round(n))
+}
+
+/** Word's size range is 1..1638 pt (2..3276 half-points); NaN/Infinity land on the floor. */
+function clampFontSizeHalfPoints(v: number): number {
+  if (Number.isNaN(v)) return 2
+  return Math.min(3276, Math.max(2, Math.round(v)))
+}
 
 function patchRun(children: Children, rp: StyleRunProps): void {
   children.flag('w:b', rp.bold)
@@ -231,7 +245,7 @@ function patchRun(children: Children, rp: StyleRunProps): void {
     )
   }
   if (rp.sizeHalfPoints !== undefined) {
-    const sz = rp.sizeHalfPoints === null ? null : num(rp.sizeHalfPoints)
+    const sz = rp.sizeHalfPoints === null ? null : clampFontSizeHalfPoints(rp.sizeHalfPoints)
     children.set('w:sz', sz === null ? null : `<w:sz w:val="${sz}"/>`)
     children.set('w:szCs', sz === null ? null : `<w:szCs w:val="${sz}"/>`)
   }
@@ -253,6 +267,14 @@ function patchRun(children: Children, rp: StyleRunProps): void {
 }
 
 function patchPara(children: Children, pp: StyleParaProps): void {
+  if (pp.numPr !== undefined) {
+    children.set(
+      'w:numPr',
+      pp.numPr === null
+        ? null
+        : `<w:numPr><w:ilvl w:val="${pp.numPr.ilvl}"/><w:numId w:val="${pp.numPr.numId}"/></w:numPr>`,
+    )
+  }
   if (pp.align !== undefined) {
     children.set(
       'w:jc',
@@ -335,6 +357,18 @@ export function mergeStyleXml(existing: string | null, up: StyleUpsert): string 
     children.set('w:rPr', inner.size ? `<w:rPr>${inner.toXml()}</w:rPr>` : null)
   }
   return tag('w:style', attrs, children.toXml())
+}
+
+export function upsertStyleXml(xml: string, up: StyleUpsert): string {
+  const escapedId = up.styleId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const existing = new RegExp(
+    `<w:style\\b[^>]*\\bw:styleId=(["'])${escapedId}\\1[^>]*(?:\\/>|>[\\s\\S]*?<\\/w:style>)`,
+  )
+  const match = existing.exec(xml)
+  const styleXml = mergeStyleXml(match?.[0] ?? null, up)
+  return match
+    ? xml.replace(existing, () => styleXml)
+    : xml.replace('</w:styles>', `${styleXml}</w:styles>`)
 }
 
 /** Patch only the requested default font slots, preserving all other defaults. */

@@ -5,11 +5,14 @@ import { gensparkAttributionHeaders, opencodeSessionHeaders } from '../providers
 import type { AiChatResponse, AiProviderConfig } from '../types'
 import { createStreamWatchdog, type StreamWatchdog } from '../watchdog'
 import {
+  endpointUrl,
   jsonBodyInsteadOfSse,
   parseToolInput,
+  readCappedResponseText,
   sseErrorText,
   sseLines,
   throwIfCreditsNotice,
+  throwIfToolCountOverBudget,
   throwIfToolJsonOverBudget,
   type StreamCallbacks,
 } from './shared'
@@ -83,6 +86,9 @@ function emitAnthropicJsonMessage(bodyText: string, cb: StreamCallbacks): void {
       cb.onDelta(block.text)
     } else if (block.type === 'tool_use' && block.name) {
       emitted = true
+      // A complete JSON body carries the whole turn at once, so the per-turn tool
+      // budget of the streamed path has to be applied here as well
+      throwIfToolCountOverBudget(toolCalls.length + 1, 'anthropic')
       toolCalls.push({
         id: block.id ?? crypto.randomUUID(),
         name: block.name,
@@ -127,7 +133,7 @@ async function anthropicTurn(
   }
   let response: Response
   try {
-    response = await aiFetch(`${baseUrl.replace(/\/$/, '')}/v1/messages`, {
+    response = await aiFetch(endpointUrl(baseUrl, 'v1/messages'), {
       method: 'POST',
       signal: wd.signal,
       headers: {
@@ -169,15 +175,20 @@ async function anthropicTurn(
   // headers arrived: ping the renderer watchdog too, or a slow first chunk could trip it
   onBytes()
   if (!response.ok || !response.body) {
-    throw new Error(`Claude HTTP ${response.status}: ${httpBodyDetail(await response.text())}`)
+    throw new Error(
+      `Claude HTTP ${response.status}: ${httpBodyDetail(await readCappedResponseText(response, onBytes))}`,
+    )
   }
-  const jsonBody = await jsonBodyInsteadOfSse(response)
+  const jsonBody = await jsonBodyInsteadOfSse(response, onBytes)
   if (jsonBody !== null) {
     throwIfCreditsNotice(jsonBody)
     return emitAnthropicJsonMessage(jsonBody, cb)
   }
   // tool_use inputs stream as partial JSON per content block
   const pendingTools = new Map<number, { id: string; name: string; json: string }>()
+  // Some gateways omit the optional block index on delta/stop events; track the
+  // last started block so parallel tools don't cross-wire into index 0
+  let currentToolIndex = 0
   // emission deferred to stream end: message_delta's stop_reason arrives after all
   // blocks, and a max_tokens stop must mark the last (cut-off) tool call as truncated
   const completedTools: AgentToolCall[] = []
@@ -202,7 +213,12 @@ async function anthropicTurn(
       continue
     }
     if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-      pendingTools.set(event.index ?? 0, {
+      const toolIndex = event.index ?? 0
+      currentToolIndex = toolIndex
+      if (!pendingTools.has(toolIndex)) {
+        throwIfToolCountOverBudget(pendingTools.size + completedTools.length + 1, 'anthropic')
+      }
+      pendingTools.set(toolIndex, {
         id: event.content_block.id ?? crypto.randomUUID(),
         name: event.content_block.name ?? '',
         json: '',
@@ -212,16 +228,17 @@ async function anthropicTurn(
         emitted = true
         cb.onDelta(event.delta.text)
       } else if (event.delta?.type === 'input_json_delta') {
-        const pending = pendingTools.get(event.index ?? 0)
+        const pending = pendingTools.get(event.index ?? currentToolIndex)
         if (pending) {
           pending.json += event.delta.partial_json ?? ''
           throwIfToolJsonOverBudget(pending.json.length, 'anthropic')
         }
       }
     } else if (event.type === 'content_block_stop') {
-      const pending = pendingTools.get(event.index ?? 0)
+      const stopIndex = event.index ?? currentToolIndex
+      const pending = pendingTools.get(stopIndex)
       if (pending) {
-        pendingTools.delete(event.index ?? 0)
+        pendingTools.delete(stopIndex)
         const { input, error } = parseToolInput(pending.json)
         completedTools.push({ id: pending.id, name: pending.name, input, inputError: error })
       }
@@ -241,6 +258,19 @@ async function anthropicTurn(
         'If this recurs on a large request (e.g. generating a whole document), ask for the output in several smaller parts.',
     )
   }
+  // A max_tokens stop can cut a tool_use block before its content_block_stop: emit
+  // the partial call as truncated rather than dropping it and answering "done".
+  for (const pending of pendingTools.values()) {
+    const { input, error } = parseToolInput(pending.json)
+    completedTools.push({
+      id: pending.id,
+      name: pending.name,
+      input,
+      inputError: error,
+      truncated: true,
+    })
+  }
+  pendingTools.clear()
   const lastTool = completedTools.at(-1)
   if (stopReason === 'max_tokens' && lastTool) lastTool.truncated = true
   for (const call of completedTools) cb.onToolCall(call)
@@ -253,6 +283,9 @@ async function anthropicTurn(
   if (!emitted && completedTools.length === 0 && !stopReason) {
     throw new Error('Claude returned no content (empty stream)')
   }
+  if (!stopReason) {
+    throw new Error('Claude stream ended before a stop_reason')
+  }
   if (stopReason) cb.onStopReason?.(stopReason)
 }
 
@@ -263,7 +296,7 @@ export async function chatAnthropic(
   user: string,
   baseUrl = ANTHROPIC_BASE_URL,
 ): Promise<AiChatResponse> {
-  const response = await aiFetch(`${baseUrl.replace(/\/$/, '')}/v1/messages`, {
+  const response = await aiFetch(endpointUrl(baseUrl, 'v1/messages'), {
     method: 'POST',
     signal: wd.signal,
     headers: {
@@ -286,13 +319,13 @@ export async function chatAnthropic(
   if (!response.ok) {
     return {
       ok: false,
-      error: `Claude HTTP ${response.status}: ${httpBodyDetail(await response.text())}`,
+      error: `Claude HTTP ${response.status}: ${httpBodyDetail(await readCappedResponseText(response, () => wd.touch()))}`,
     }
   }
   // A 200 with an HTML shell / empty / truncated body (gateway soft-failure)
   // would make response.json() throw; return ok:false instead of leaking a
   // raw SyntaxError to the caller.
-  const bodyText = await response.text()
+  const bodyText = await readCappedResponseText(response, () => wd.touch())
   let json: { content?: Array<{ type: string; text?: string }> }
   try {
     json = JSON.parse(bodyText) as { content?: Array<{ type: string; text?: string }> }

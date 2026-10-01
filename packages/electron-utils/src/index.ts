@@ -2,7 +2,9 @@ export {
   buildContextMenuItems,
   contextMenuLabels,
   installContextMenu,
+  setContextMenuInterceptor,
   VIEW_IMAGE_CHANNEL,
+  type ContextMenuInterceptor,
   type ContextMenuItem,
   type ContextMenuLabels,
 } from './context-menu'
@@ -24,6 +26,7 @@ export {
   viewMenuTemplate,
   windowMenuTemplate,
   type AppMenuLabels,
+  type ViewMenuOptions,
 } from './app-menu'
 export { GITHUB_REPO_URL } from './github-menu'
 export {
@@ -55,7 +58,13 @@ export {
   isSafeRemoteUrl,
   type FetchWithSsrfGuardOptions,
 } from './safe-remote-url'
-export { fetchRemoteImage, remoteImageHeaders } from './remote-image'
+export {
+  MAX_REMOTE_IMAGE_BYTES,
+  ResponseTooLargeError,
+  fetchRemoteImage,
+  readBodyCapped,
+  remoteImageHeaders,
+} from './remote-image'
 export { GENERATED_IMAGE_DIR, readGeneratedImage, storeGeneratedImage } from './generated-images'
 export {
   buildPrintableHtml,
@@ -92,3 +101,4 @@ export {
   type RendererHost,
 } from './renderer-scheme'
 export { installRendererProtocol, registerRendererScheme } from './renderer-protocol'
+export { atomicWriteFile, writeJsonAtomic } from './atomic-write'

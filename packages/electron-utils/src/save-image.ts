@@ -4,6 +4,7 @@
 import { writeFile } from 'node:fs/promises'
 import type { BrowserWindow } from 'electron'
 import { showSaveDialogWithMemory } from './dialog-memory'
+import { MAX_REMOTE_IMAGE_BYTES, readBodyCapped } from './remote-image'
 
 const EXT_BY_MIME: Record<string, string> = {
   'image/png': 'png',
@@ -45,7 +46,13 @@ export function suggestImageFileName(url: string, mime: string | null | undefine
 }
 
 export function decodeDataUrl(url: string): { bytes: Buffer; mime: string | null } | null {
-  const m = /^data:([^;,]*)((?:;[^,]*)*),([\s\S]*)$/i.exec(url)
+  // The parameter run is `;`-prefixed and its body excludes `;`, so each
+  // iteration has exactly one possible length. With `;[^,]*` instead, one
+  // iteration could swallow several parameters or several could cover one, and
+  // a URL with no comma made the engine try every split - exponential, so a
+  // ~100-character data: URL in a document froze the main process when the user
+  // chose "Save image".
+  const m = /^data:([^;,]*)((?:;[^;,]*)*),([\s\S]*)$/i.exec(url)
   if (!m) return null
   const mime = m[1] || null
   const payload = m[3] ?? ''
@@ -64,7 +71,10 @@ async function fetchImageBytes(url: string): Promise<{ bytes: Buffer; mime: stri
   const { net } = await import('electron')
   const res = await net.fetch(url)
   if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`)
-  return { bytes: Buffer.from(await res.arrayBuffer()), mime: res.headers.get('content-type') }
+  return {
+    bytes: Buffer.from(await readBodyCapped(res, MAX_REMOTE_IMAGE_BYTES)),
+    mime: res.headers.get('content-type'),
+  }
 }
 
 export async function saveImageFromUrl(
