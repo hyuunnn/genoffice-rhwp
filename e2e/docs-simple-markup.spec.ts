@@ -109,17 +109,23 @@ test.describe('docs Simple Markup view', () => {
       const balloon = page.locator('.comment-balloon')
       await expect(balloon).toHaveCount(1)
       await expect(balloon).toHaveAttribute('title', /Ann/)
-      // The node exists, but an unrendered one answers null to boundingBox().
-      // Wait for the layout instead of reading the box the moment the count
-      // settles.
-      await expect(balloon).toBeVisible()
-      const paperRight = await page
-        .locator('.ProseMirror')
-        .first()
-        .evaluate((el) => el.getBoundingClientRect().right)
-      const balloonBox = await balloon.boundingBox()
-      expect(balloonBox).not.toBeNull()
-      expect(balloonBox!.x + balloonBox!.width).toBeLessThanOrEqual(paperRight + 1)
+      // The node can be replaced after it first becomes visible. A one-shot
+      // boundingBox() then returns null even though toBeVisible just passed.
+      // Poll until the glyph is laid out inside the page.
+      await expect
+        .poll(
+          async () => {
+            const box = await balloon.boundingBox()
+            if (!box || box.width === 0 || box.height === 0) return false
+            const paperRight = await page
+              .locator('.ProseMirror')
+              .first()
+              .evaluate((el) => el.getBoundingClientRect().right)
+            return box.x + box.width <= paperRight + 1
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true)
 
       // Markup menu in Word's order with the current view ticked
       await page.locator('.ribbon-tab', { hasText: /^Review$/ }).click()
