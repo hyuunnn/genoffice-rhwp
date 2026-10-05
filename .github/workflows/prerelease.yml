@@ -3,29 +3,34 @@ name: Pre-release
 # Unsigned Mac + Windows installers for the Hangul preview. Official
 # genspark-ai/genoffice releases stay on their private signing pipeline.
 # CI calls this after a green push to main; workflow_dispatch remains for
-# a manual rebuild of the same rolling tag.
+# a manual rebuild.
+#
+# The installer version is apps/shell/package.json (the GenOffice version).
+# Each of those versions gets one rolling tag, v<version>-hangul: pushes that
+# stay on 0.11.0 replace that release, and a later bump to 0.12.0 adds a new
+# one. A workflow_dispatch version overrides the package.json version.
 
 on:
   workflow_call:
     inputs:
       version:
-        description: Installer version (also the git tag, with a v prefix)
+        description: Installer version override (empty = apps/shell/package.json)
         type: string
         required: false
-        default: '0.9.0-hangul'
+        default: ''
       tag:
-        description: Git tag to create (leave empty to use v<version>)
+        description: Git tag to create (leave empty to use v<version>-hangul)
         type: string
         required: false
         default: ''
   workflow_dispatch:
     inputs:
       version:
-        description: Installer version (also the git tag, with a v prefix)
-        required: true
-        default: '0.9.0-hangul'
+        description: Installer version override (empty = apps/shell/package.json)
+        required: false
+        default: ''
       tag:
-        description: Git tag to create (leave empty to use v<version>)
+        description: Git tag to create (leave empty to use v<version>-hangul)
         required: false
         default: ''
 
@@ -72,7 +77,13 @@ jobs:
         run: |
           npm run notices
           npm run build:all
-          (cd apps/shell && npx electron-builder --mac --publish never --config.extraMetadata.version="$VERSION")
+          # No override: electron-builder reads apps/shell/package.json, which
+          # is the GenOffice version this preview is tracking.
+          args=(--mac --publish never)
+          if [ -n "${VERSION}" ]; then
+            args+=(--config.extraMetadata.version="$VERSION")
+          fi
+          (cd apps/shell && npx electron-builder "${args[@]}")
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -128,7 +139,13 @@ jobs:
         run: |
           npm run notices
           npm run build:all
-          (cd apps/shell && npx electron-builder --win --publish never --config.extraMetadata.version="$VERSION")
+          # No override: electron-builder reads apps/shell/package.json, which
+          # is the GenOffice version this preview is tracking.
+          args=(--win --publish never)
+          if [ -n "${VERSION}" ]; then
+            args+=(--config.extraMetadata.version="$VERSION")
+          fi
+          (cd apps/shell && npx electron-builder "${args[@]}")
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -158,7 +175,17 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${TAG:-v${VERSION}}"
+          version="${VERSION}"
+          if [ -z "$version" ]; then
+            version="$(node -p "require('./apps/shell/package.json').version")"
+          fi
+          if [ -n "$TAG" ]; then
+            tag="$TAG"
+          elif [[ "$version" == *-hangul ]]; then
+            tag="v${version}"
+          else
+            tag="v${version}-hangul"
+          fi
           shopt -s nullglob
           files=(dist/*.dmg dist/*.zip dist/*.exe)
           if [ ${#files[@]} -eq 0 ]; then
@@ -166,8 +193,8 @@ jobs:
             ls -la dist >&2 || true
             exit 1
           fi
-          # Rolling preview tag: replace the previous Hangul pre-release so
-          # the download URL stays https://github.com/<repo>/releases/tag/$tag
+          # One rolling release per GenOffice version. A later package.json
+          # bump publishes a new tag and leaves the previous version in place.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release delete "$tag" --yes --cleanup-tag
           fi
@@ -187,7 +214,7 @@ jobs:
           EOF
           )"
           gh release create "$tag" "${files[@]}" \
-            --title "GenOffice ${VERSION} (Hangul preview)" \
+            --title "GenOffice ${version} (Hangul preview)" \
             --notes "$notes" \
             --prerelease \
             --target "${{ github.sha }}"

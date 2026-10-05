@@ -262,5 +262,3 @@ jobs:
       contents: write
     uses: ./.github/workflows/prerelease.yml
     secrets: inherit
-    with:
-      version: '0.9.0-hangul'
