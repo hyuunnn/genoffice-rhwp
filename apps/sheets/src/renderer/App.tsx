@@ -4211,20 +4211,60 @@ export function App({
   }
 
   // A workbook loaded into an already-mounted view (the prewarmed spare) can
-  // leave document focus on a node Univer no longer reads keys from; hand it
-  // back to the cell editor unless chrome (AI composer, dialogs) holds it.
+  // finish while that view is still hidden. document.hasFocus() is false then,
+  // so handing focus to the cell editor has to wait until the view is shown.
+  // Without the retry, keystrokes land on a node Univer no longer reads.
+  const pendingGridFocusRef = useRef(false)
+  const focusSheetGridRef = useRef<() => void>(() => {})
+
   function focusSheetGrid(): void {
     const runtime = univerRef.current
-    if (!runtime || !document.hasFocus()) return
+    if (!runtime) return
+    if (!document.hasFocus()) {
+      const firstMiss = !pendingGridFocusRef.current
+      pendingGridFocusRef.current = true
+      // The show/focus event may already have passed, or hasFocus() may flip
+      // a moment later. A few retries cover that without looping forever.
+      if (firstMiss) {
+        for (const delay of [50, 250, 1000]) {
+          window.setTimeout(() => {
+            if (pendingGridFocusRef.current) focusSheetGridRef.current()
+          }, delay)
+        }
+      }
+      return
+    }
     const active = document.activeElement
     const chromeHoldsFocus =
       active !== null &&
       active !== document.body &&
       active.isConnected &&
       !active.closest('#univer-container')
+    pendingGridFocusRef.current = false
     if (chromeHoldsFocus) return
     runtime.univer.__getInjector().get(ILayoutService).focus()
   }
+  focusSheetGridRef.current = focusSheetGrid
+
+  useEffect(() => {
+    const nudge = () => {
+      if (!pendingGridFocusRef.current) return
+      focusSheetGridRef.current()
+    }
+    const onShown = () => {
+      if (document.visibilityState === 'hidden') return
+      nudge()
+      requestAnimationFrame(nudge)
+      window.setTimeout(nudge, 50)
+      window.setTimeout(nudge, 250)
+    }
+    window.addEventListener('focus', onShown)
+    document.addEventListener('visibilitychange', onShown)
+    return () => {
+      window.removeEventListener('focus', onShown)
+      document.removeEventListener('visibilitychange', onShown)
+    }
+  }, [])
 
   async function handleInspectWorkbook(): Promise<void> {
     if (workbookOpeningRef.current) return
