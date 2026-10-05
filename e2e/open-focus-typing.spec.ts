@@ -282,7 +282,16 @@ test('sheets: typing works when a spare view opens the next workbook', async () 
           await expect.poll(() => cellA1Value(sheets), { timeout: 1_000 }).toBe(4242)
           break
         } catch {
-          // A1 still holds the old value — walk the cursor back and retype.
+          // A1 still holds the old value — click the cell, then walk back and retype.
+        }
+        // Keystrokes alone can leave the adopted editor focused while Univer
+        // never commits them (Enter moves to A2, the value stays "Old"). A
+        // click inside A1 rebinds that editor the way a user would.
+        const canvas = sheets.locator('#univer-container canvas').first()
+        const box = await canvas.boundingBox()
+        if (box) {
+          // Row and column headers occupy the canvas corner (~46×24).
+          await sheets.mouse.click(box.x + 76, box.y + 48)
         }
         for (let up = 0; up < 5; up += 1) {
           if ((await activeRangeNotation(sheets)) === 'A1') break
