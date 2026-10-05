@@ -93,20 +93,38 @@ function discover(text) {
   return found
 }
 
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504])
+
 async function download(urlPath) {
-  const res = await fetch(`${ORIGIN}${urlPath}`)
-  if (!res.ok || !res.body) throw new Error(`${res.status} ${urlPath}`)
-  const dest = destFor(urlPath)
-  await mkdir(dirname(dest), { recursive: true })
-  if (isTextPath(urlPath)) {
-    let text = await res.text()
-    if (dest.endsWith('index.html')) text = stripPwaHtml(text)
-    else if (dest.endsWith('.js')) text = patchStudioSource(text, dest)
-    await writeFile(dest, text)
-    return text
+  let lastError = new Error(`download failed ${urlPath}`)
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const res = await fetch(`${ORIGIN}${urlPath}`)
+      if (!res.ok || !res.body) {
+        lastError = new Error(`${res.status} ${urlPath}`)
+        if (!RETRY_STATUSES.has(res.status)) throw lastError
+      } else {
+        const dest = destFor(urlPath)
+        await mkdir(dirname(dest), { recursive: true })
+        if (isTextPath(urlPath)) {
+          let text = await res.text()
+          if (dest.endsWith('index.html')) text = stripPwaHtml(text)
+          else if (dest.endsWith('.js')) text = patchStudioSource(text, dest)
+          await writeFile(dest, text)
+          return text
+        }
+        await pipeline(Readable.fromWeb(res.body), createWriteStream(dest))
+        return ''
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err))
+      const status = Number(lastError.message.slice(0, 3))
+      const retryable = !Number.isInteger(status) || RETRY_STATUSES.has(status)
+      if (attempt === 4 || !retryable) throw lastError
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400 * attempt))
   }
-  await pipeline(Readable.fromWeb(res.body), createWriteStream(dest))
-  return ''
+  throw lastError
 }
 
 async function stripPwaFiles() {
