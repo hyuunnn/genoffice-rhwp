@@ -10,7 +10,7 @@ import {
   parseToolInput,
   readCappedResponseText,
   sseErrorText,
-  sseLines,
+  sseDataEvents,
   throwIfCreditsNotice,
   throwIfToolCountOverBudget,
   throwIfToolJsonOverBudget,
@@ -194,10 +194,7 @@ async function anthropicTurn(
   const completedTools: AgentToolCall[] = []
   let stopReason: string | undefined
   let emitted = false
-  for await (const line of sseLines(response.body, onBytes)) {
-    if (!line.startsWith('data:')) continue
-    const payload = line.slice(5).trim()
-    if (!payload) continue
+  for await (const payload of sseDataEvents(response.body, onBytes)) {
     // A truncated frame or a non-JSON keep-alive from a proxy should skip
     // that event, not kill the entire AI turn with a parser error.
     let event
@@ -239,8 +236,12 @@ async function anthropicTurn(
       const pending = pendingTools.get(stopIndex)
       if (pending) {
         pendingTools.delete(stopIndex)
-        const { input, error } = parseToolInput(pending.json)
-        completedTools.push({ id: pending.id, name: pending.name, input, inputError: error })
+        // Match the OpenAI route: drop nameless tool calls instead of feeding
+        // an empty-name call to the loop (which would always fail as unknown)
+        if (pending.name) {
+          const { input, error } = parseToolInput(pending.json)
+          completedTools.push({ id: pending.id, name: pending.name, input, inputError: error })
+        }
       }
     } else if (event.type === 'message_delta') {
       if (event.delta?.stop_reason) stopReason = event.delta.stop_reason
